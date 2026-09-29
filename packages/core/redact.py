@@ -21,6 +21,15 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("stripe_key", re.compile(r"\b(?:sk|rk)_(?:live|test)_[0-9A-Za-z]{16,}\b")),
     ("private_key_block", re.compile(r"-----BEGIN[ A-Z]*PRIVATE KEY-----")),
     ("jwt", re.compile(r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b")),
+    # Common third-party keys that leak in front-end JS bundles (trufflehog often skips lone
+    # ones without a valid pair/checksum; these are the high-signal formats hunters watch for).
+    ("mapbox_token", re.compile(r"\bpk\.eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}\b")),
+    ("sendgrid_key", re.compile(r"\bSG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}\b")),
+    ("gitlab_pat", re.compile(r"\bglpat-[A-Za-z0-9_\-]{20}\b")),
+    ("npm_token", re.compile(r"\bnpm_[A-Za-z0-9]{36}\b")),
+    ("twilio_account_sid", re.compile(r"\bAC[0-9a-fA-F]{32}\b")),
+    ("slack_webhook", re.compile(r"https://hooks\.slack\.com/services/T[0-9A-Za-z_\-/]{20,}")),
+    ("square_access_token", re.compile(r"\b(?:sq0atp|EAAA)[0-9A-Za-z_\-]{22,}\b")),
     (
         "generic_bearer",
         re.compile(r"(?i)\b(?:bearer|token|secret|api[_-]?key)\s*[:=]\s*([^\s'\"]{12,})"),

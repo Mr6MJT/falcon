@@ -166,6 +166,7 @@ def run_tool(
     bucket: TokenBucketBackend | None = None,
     audit=None,  # callable(event: dict) -> None; the hash-chained audit sink
     redact_stdout: bool = True,  # False ONLY for the secrets stage (see below)
+    no_target_argv: bool = False,  # validate+rate-limit targets but don't put them on argv/stdin
     _runner=None,  # injectable spawn fn for tests; defaults to subprocess
 ) -> ToolResult:
     if tool not in TOOL_PROFILES:
@@ -207,7 +208,11 @@ def run_tool(
         cmd += ["--max-attempts", str(attempts)]
     # ProjectDiscovery engines read their target list from stdin; bespoke-CLI tools take it
     # positionally. Getting this wrong makes the engine run against an empty target set.
-    if tp.stdin_targets:
+    # no_target_argv: the caller already embedded the (now scope-validated) target in extra_args
+    # — e.g. ffuf's `-u https://host/FUZZ` — so we neither append it nor pipe it.
+    if no_target_argv:
+        stdin_data = None
+    elif tp.stdin_targets:
         stdin_data = "\n".join(kept) + "\n"
     else:
         cmd += kept

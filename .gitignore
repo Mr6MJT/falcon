@@ -32,3 +32,6 @@ pgdata/
 .DS_Store
 .idea/
 .vscode/
+
+# subfinder provider keys (filled-in copy is secret)
+infra/subfinder-provider-config.yaml

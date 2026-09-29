@@ -15,6 +15,8 @@ injected runner, so no real binary or network is needed to exercise the logic.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from urllib.parse import parse_qsl, urlparse
@@ -23,7 +25,6 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from .crypto import encrypt
 from .events import NullPublisher
 from .findings import SEVERITY_CVSS, finding_from_nuclei, make_dedup_key, severity_from
 from .guard import ToolResult, run_tool
@@ -41,7 +42,7 @@ from .models import (
     TLSInfo,
 )
 from .ratelimit import RateProfile
-from .redact import mask_value, sha256_hex
+from .redact import redact
 from .scope import ScopeRule, is_in_scope
 
 
@@ -270,7 +271,14 @@ def run_subdomains(ctx: StageContext) -> dict:
     ctx.check_cancel()
     run = ctx.runner()
     # Only enumerate roots that are themselves in scope.
-    res = run("subfinder", ctx.roots, extra_args=["-silent"])
+    extra = ["-silent"]
+    # Optional provider API keys (SecurityTrails, Shodan, VirusTotal, GitHub, …) dramatically
+    # widen passive discovery. Point ORVEX_SUBFINDER_CONFIG at a provider-config.yaml to enable
+    # them and use every configured source; without it subfinder still uses the free sources.
+    pc = os.environ.get("ORVEX_SUBFINDER_CONFIG")
+    if pc:
+        extra += ["-pc", pc, "-all"]
+    res = run("subfinder", ctx.roots, extra_args=extra)
     hosts = parse_subfinder(res.stdout)
     # Always include the roots themselves as discovered hosts.
     hosts = sorted(set(hosts) | {h.lower() for h in ctx.roots})
@@ -515,38 +523,99 @@ def run_urls(ctx: StageContext) -> dict:
     return {"urls": n_urls, "parameters": n_params}
 
 
-def run_secrets(ctx: StageContext) -> dict:
-    """trufflehog over in-scope hosts -> secrets (mask + sha256 only, by default).
+# Asset suffixes most likely to carry hard-coded secrets; JS bundles above all.
+_SECRET_SCAN_SUFFIXES = (
+    ".js", ".mjs", ".cjs", ".jsx", ".ts", ".json", ".map",
+    ".env", ".txt", ".yml", ".yaml", ".config", ".xml",
+)
+_MAX_SECRET_TARGETS = 800
 
-    Raw values are requested (redact_stdout=False) ONLY to compute a mask + sha256 in memory;
-    they are never logged and only stored as ciphertext when full retention is opted in
-    (scan.config['retain_secrets'] and a key is configured). Prefer verified findings.
+
+def _secret_scan_urls(ctx: StageContext) -> list[str]:
+    """In-scope endpoint URLs worth fetching for secret scanning: JS/JSON/config assets first,
+    then a bounded number of HTML pages (inline scripts leak too)."""
+    urls = list(ctx.session.execute(
+        select(HTTPEndpoint.url).where(HTTPEndpoint.scan_id == ctx.scan.id).distinct()
+    ).scalars().all())
+    assets, pages = [], []
+    for u in urls:
+        path = urlparse(u).path.lower()
+        (assets if path.endswith(_SECRET_SCAN_SUFFIXES) else pages).append(u)
+    return (assets + pages)[:_MAX_SECRET_TARGETS]
+
+
+def _parse_httpx_srd_index(index_path: str) -> dict[str, str]:
+    """Map each stored-response file path -> its source URL, from httpx -srd's index.txt."""
+    mapping: dict[str, str] = {}
+    try:
+        with open(index_path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                parts = line.strip().split(" ", 2)
+                if len(parts) >= 2:
+                    mapping[parts[0]] = parts[1]
+    except OSError:
+        pass
+    return mapping
+
+
+def _fetch_response_bodies(ctx: StageContext, urls: list[str]) -> dict[str, str]:
+    """Fetch each URL's body with the scoped httpx engine and return {source_url: body}.
+
+    httpx (-srd) writes each response to <tmp>/response/<host>/<hash>.txt plus an index.txt
+    mapping file->URL; we read them back and delete the temp dir. Separated from run_secrets so
+    the disk side-effect can be stubbed in tests.
     """
     run = ctx.runner()
-    hosts = _resolved_hosts(ctx) or _in_scope_subdomains(ctx)
-    retain = bool((getattr(ctx.scan, "config", {}) or {}).get("retain_secrets"))
-    rows: list[dict] = []
-    for chunk in chunked(hosts, 100):
-        ctx.check_cancel()
-        # redact_stdout=False: we must parse the raw detector output; see run_tool's contract.
-        res = run("trufflehog", chunk, redact_stdout=False)
-        for f in parse_trufflehog(res.stdout):
-            raw = f["raw"]
-            row = {
-                "org_id": ctx.scan.org_id, "scan_id": ctx.scan.id,
-                "detector": f["detector"], "redacted_match": mask_value(raw),
-                "sha256": sha256_hex(raw), "location": f["location"],
-                "verified": f["verified"], "ciphertext": None,
-            }
-            if retain:
+    bodies: dict[str, str] = {}
+    with tempfile.TemporaryDirectory(prefix="orvex-secrets-") as td:
+        for chunk in chunked(urls, 200):
+            ctx.check_cancel()
+            run("httpx", chunk, extra_args=["-silent", "-srd", td, "-timeout", "15",
+                                            "-mc", "200,201,203,206"])
+        index = _parse_httpx_srd_index(os.path.join(td, "response", "index.txt"))
+        for root, _dirs, files in os.walk(td):
+            for fn in files:
+                if fn == "index.txt":
+                    continue
+                fpath = os.path.join(root, fn)
                 try:
-                    row["ciphertext"] = encrypt(raw)
-                except Exception:
-                    ctx.audit({"event": "secret_encrypt_failed", "detector": f["detector"]})
-            rows.append(row)
-            # raw goes out of scope here; only mask + sha256 (+optional ciphertext) persist.
+                    with open(fpath, encoding="utf-8", errors="replace") as fh:
+                        bodies[index.get(fpath, fpath)] = fh.read()
+                except OSError:
+                    continue
+    return bodies
+
+
+def run_secrets(ctx: StageContext) -> dict:
+    """Fetch in-scope JS/JSON/config assets and scan their bodies for hard-coded secrets.
+
+    The old approach handed bare hostnames to trufflehog, which does nothing without a source
+    subcommand — so it never looked at any content and always returned 0. This fetches response
+    bodies with the (scoped, rate-limited) httpx engine, then scans them in pure Python with the
+    high-signal detector net. Only a mask + sha256 + location are stored; the plaintext is never
+    persisted or logged.
+    """
+    urls = _secret_scan_urls(ctx)
+    if not urls:
+        return {"secrets": 0, "scanned": 0}
+    bodies = _fetch_response_bodies(ctx, urls)
+    rows: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for location, body in bodies.items():
+        _redacted, refs = redact(body)
+        for ref in refs:
+            key = (ref.sha256, location)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append({
+                "org_id": ctx.scan.org_id, "scan_id": ctx.scan.id,
+                "detector": ref.detector, "redacted_match": ref.mask,
+                "sha256": ref.sha256, "location": location,
+                "verified": False, "ciphertext": None,
+            })
     n = _upsert(ctx.session, Secret, rows, ["scan_id", "sha256", "location"], update_cols=None)
-    return {"secrets": n}
+    return {"secrets": n, "scanned": len(bodies)}
 
 
 # nuclei template policy: allow reliably-automatable, non-destructive template classes;
@@ -655,11 +724,13 @@ def _classify_probe(kind: str, confirmed: bool) -> tuple[str, Confidence]:
 
 
 def parse_ffuf(stdout: str) -> list[str]:
-    """ffuf output: a JSON object with 'results':[{url|input}], or one URL per line."""
+    """ffuf output: `-json` newline-delimited records ({url,input,status}), a single JSON object
+    with 'results':[{url}], or one URL per line."""
     stdout = stdout.strip()
     if not stdout:
         return []
     urls: list[str] = []
+    # Whole-document JSON ({results:[...]}) first.
     try:
         obj = json.loads(stdout)
         for r in obj.get("results", []):
@@ -670,28 +741,47 @@ def parse_ffuf(stdout: str) -> list[str]:
             return urls
     except json.JSONDecodeError:
         pass
+    # Newline-delimited JSON records (ffuf -json).
+    for rec in _jsonl(stdout):
+        u = rec.get("url") or ""
+        if u:
+            urls.append(u)
+    if urls:
+        return urls
     return parse_urls(stdout)
 
 
-def run_fuzzing(ctx: StageContext) -> dict:
-    """ffuf content/parameter fuzzing (opt-in). Rate-limited, GET, non-destructive.
+# Directory/content fuzzing needs a wordlist. There is no general content-discovery list in the
+# image, so fuzzing is opt-in AND requires ORVEX_FUZZ_WORDLIST to point at one (e.g. a SecLists
+# file mounted into the worker). Without it the stage skips loudly instead of silently doing
+# nothing — which is how the old implementation (ffuf with no -u/-w) always behaved.
+_FUZZ_MATCH_CODES = "200,204,301,302,307,401,403,405"
 
-    Discovered paths are re-checked against scope and stored as endpoints; this never sends
-    state-changing requests.
-    """
+
+def run_fuzzing(ctx: StageContext) -> dict:
+    """ffuf content discovery (opt-in). One `-u https://host/FUZZ` run per in-scope host, GET,
+    rate-limited, non-destructive. Discovered paths are re-checked against scope and stored."""
     if not _config_flag(ctx, "fuzzing"):
         return {"skipped": "fuzzing not enabled"}
+    wordlist = os.environ.get("ORVEX_FUZZ_WORDLIST", "")
+    if not wordlist or not os.path.isfile(wordlist):
+        ctx.audit({"event": "fuzzing_skipped", "reason": "no wordlist (set ORVEX_FUZZ_WORDLIST)"})
+        return {"skipped": "no wordlist configured (ORVEX_FUZZ_WORDLIST)"}
     run = ctx.runner()
     hosts = _resolved_hosts(ctx) or _in_scope_subdomains(ctx)
     rows: list[dict] = []
     seen: set[str] = set()
-    for chunk in chunked(hosts, 50):
+    for host in hosts:
         ctx.check_cancel()
-        res = run("ffuf", chunk)
+        # The target goes in -u (not argv); the guard still scope-validates & rate-limits `host`.
+        res = run("ffuf", [host], no_target_argv=True, extra_args=[
+            "-u", f"https://{host}/FUZZ", "-w", wordlist,
+            "-mc", _FUZZ_MATCH_CODES, "-json", "-s",
+        ])
         for url in parse_ffuf(res.stdout):
-            host = urlparse(url).hostname or ""
-            if not host or not is_in_scope(host, ctx.scope_rules,
-                                           allow_internal=ctx.allow_internal).allowed:
+            h = urlparse(url).hostname or ""
+            if not h or not is_in_scope(h, ctx.scope_rules,
+                                        allow_internal=ctx.allow_internal).allowed:
                 continue
             if url not in seen:
                 seen.add(url)

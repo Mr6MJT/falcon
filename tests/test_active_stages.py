@@ -129,15 +129,31 @@ def test_active_modules_skip_when_not_enabled(session, scan):
 
 
 # --- fuzzing ----------------------------------------------------------------
-def test_fuzzing_discovers_in_scope_only(session, scan):
+def test_fuzzing_discovers_in_scope_only(session, scan, tmp_path, monkeypatch):
+    wl = tmp_path / "wl.txt"
+    wl.write_text("admin\nsecret\n")
+    monkeypatch.setenv("ORVEX_FUZZ_WORDLIST", str(wl))
     scan.config = {"fuzzing": True}
     session.flush()
-    run_fuzzing(_ctx(session, scan))
+    calls: list = []
+    run_fuzzing(_ctx(session, scan, calls=calls))
     urls = session.execute(
         select(HTTPEndpoint.url).where(HTTPEndpoint.scan_id == scan.id)
     ).scalars().all()
     assert "https://www.example.com/admin" in urls
     assert not any("attacker.net" in u for u in urls)  # out-of-scope dropped
+    # ffuf is invoked per host with -u FUZZ + -w wordlist and no positional target.
+    ffuf_calls = [c for c in calls if c["tool"] == "ffuf"]
+    assert ffuf_calls and all(c["kw"].get("no_target_argv") for c in ffuf_calls)
+    assert any("-u" in c["kw"].get("extra_args", []) for c in ffuf_calls)
+
+
+def test_fuzzing_skips_without_wordlist(session, scan, monkeypatch):
+    monkeypatch.delenv("ORVEX_FUZZ_WORDLIST", raising=False)
+    scan.config = {"fuzzing": True}
+    session.flush()
+    assert run_fuzzing(_ctx(session, scan)) == {
+        "skipped": "no wordlist configured (ORVEX_FUZZ_WORDLIST)"}
 
 
 # --- active probes: honesty -------------------------------------------------

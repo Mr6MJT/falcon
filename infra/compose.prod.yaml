@@ -67,6 +67,12 @@ services:
       ORVEX_DATABASE_URL: *app_db
       ORVEX_REDIS_URL: redis://redis:6379/0
       ORVEX_SECRET_KEY: ${ORVEX_SECRET_KEY}
+      # Empty by default (free sources only). To widen passive discovery, fill in
+      # infra/subfinder-provider-config.yaml, uncomment the mount below, and set this to the
+      # mounted path in infra/.env: ORVEX_SUBFINDER_CONFIG=/app/infra/subfinder-provider-config.yaml
+      ORVEX_SUBFINDER_CONFIG: ${ORVEX_SUBFINDER_CONFIG:-}
+    # volumes:
+    #   - ./subfinder-provider-config.yaml:/app/infra/subfinder-provider-config.yaml:ro
     cap_drop: ["ALL"]
     cap_add: ["NET_RAW"]
     security_opt: ["no-new-privileges:true"]
