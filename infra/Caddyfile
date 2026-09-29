@@ -1,0 +1,11 @@
+# Reverse proxy: serves the web app and proxies /api/* to the API (same origin -> no CORS,
+# and WebSockets pass through automatically). Set FALCON_DOMAIN to your domain for auto-HTTPS;
+# for a quick IP test use ":80" as the site address.
+{$FALCON_DOMAIN:localhost} {
+	handle_path /api/* {
+		reverse_proxy api:8000
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}

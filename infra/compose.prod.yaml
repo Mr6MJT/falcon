@@ -1,0 +1,111 @@
+# Falcon — full online stack. Run from the repo root:
+#   docker compose --env-file infra/.env -f infra/compose.prod.yaml up -d --build
+# Postgres/Redis are never exposed to the host; only Caddy publishes 80/443.
+#
+# NOTE: this runs the worker with normal egress. The Gate-3 egress firewall (infra/egress +
+# the internal/egress networks in infra/compose.yaml) is the production hardening step to
+# layer on once the app stack is up; app-level scope + rate limits are always enforced.
+name: falcon
+
+x-app-db: &app_db "postgresql+psycopg://orvex_app:${ORVEX_DB_PASSWORD}@postgres:5432/orvex"
+x-owner-db: &owner_db "postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@postgres:5432/orvex"
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: orvex
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  # One-shot: create the app role, migrate, seed the first admin. Exits when done.
+  bootstrap:
+    build: {context: .., dockerfile: apps/api/Dockerfile}
+    command: ["sh", "infra/bootstrap.sh"]
+    environment:
+      ADMIN_DB_URL: *owner_db
+      ORVEX_DB_PASSWORD: ${ORVEX_DB_PASSWORD}
+      ORVEX_ADMIN_EMAIL: ${ORVEX_ADMIN_EMAIL}
+      ORVEX_ADMIN_PASSWORD: ${ORVEX_ADMIN_PASSWORD}
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+
+  api:
+    build: {context: .., dockerfile: apps/api/Dockerfile}
+    environment:
+      ORVEX_DATABASE_URL: *app_db
+      ORVEX_AUTH_DATABASE_URL: *owner_db
+      ORVEX_REDIS_URL: redis://redis:6379/0
+      ORVEX_JWT_SECRET: ${ORVEX_JWT_SECRET}
+      ORVEX_SECRET_KEY: ${ORVEX_SECRET_KEY}
+      ORVEX_CORS_ORIGINS: "https://${FALCON_DOMAIN}"
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      bootstrap: {condition: service_completed_successfully}
+    restart: unless-stopped
+
+  worker:
+    build: {context: .., dockerfile: engines/Dockerfile.worker}
+    command: ["celery -A apps.worker.celery_app worker -l info -Q recon,active,cpu,report"]
+    environment:
+      ORVEX_DATABASE_URL: *app_db
+      ORVEX_REDIS_URL: redis://redis:6379/0
+      ORVEX_SECRET_KEY: ${ORVEX_SECRET_KEY}
+    cap_drop: ["ALL"]
+    cap_add: ["NET_RAW"]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      redis: {condition: service_healthy}
+      bootstrap: {condition: service_completed_successfully}
+    restart: unless-stopped
+
+  beat:
+    build: {context: .., dockerfile: engines/Dockerfile.worker}
+    command: ["celery -A apps.worker.celery_app beat -l info"]
+    environment:
+      ORVEX_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis: {condition: service_healthy}
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE}
+    depends_on: [api]
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    ports: ["80:80", "443:443"]
+    environment:
+      FALCON_DOMAIN: ${FALCON_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [web, api]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
