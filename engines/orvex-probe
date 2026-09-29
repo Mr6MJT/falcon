@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""orvex-probe — canary-based active probe engine (bundled in the worker image).
+
+Reads target URLs from argv, runs the reflection/boolean-diff/canary checks from
+packages.core.probes, and emits one JSON finding per line for the `active` stage to store.
+GET/idempotent by default. Non-destructive. Egress is constrained by Gate 3 (the egress
+firewall) at the network layer, independently of this process.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+import urllib.error
+import urllib.request
+
+from packages.core.probes import probe_url
+
+USER_AGENT = "orvex-probe/1.0 (+authorized-testing)"
+TIMEOUT = 10
+
+
+def make_fetch(method_override: str | None):
+    def fetch(url: str, method: str = "GET"):
+        m = method_override or method
+        req = urllib.request.Request(url, method=m, headers={"User-Agent": USER_AGENT})
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:  # noqa: S310 (authorized target)
+                body = r.read(200_000).decode("utf-8", "replace")
+                return r.status, {k.lower(): v for k, v in r.headers.items()}, body
+        except urllib.error.HTTPError as e:
+            body = e.read(200_000).decode("utf-8", "replace") if e.fp else ""
+            return e.code, {k.lower(): v for k, v in (e.headers or {}).items()}, body
+        except Exception:  # noqa: BLE001 — a dead endpoint is not a probe result
+            return 0, {}, ""
+    return fetch
+
+
+def parse_args(argv: list[str]) -> tuple[str | None, list[str]]:
+    method = None
+    targets: list[str] = []
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--methods" and i + 1 < len(argv):
+            method = argv[i + 1]
+            i += 2
+            continue
+        targets.append(argv[i])
+        i += 1
+    return method, targets
+
+
+def main(argv: list[str]) -> int:
+    method, targets = parse_args(argv)
+    fetch = make_fetch(method if method and method != "GET" else None)
+    for url in targets:
+        for finding in probe_url(url, fetch):
+            print(json.dumps(finding))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

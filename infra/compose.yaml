@@ -1,0 +1,104 @@
+# Local dev infra for Orvex. The full compose (web/api/worker/beat/flower/lab) lands in
+# later slices; for now this provides the datastores the safety core + schema need.
+#
+# Design note (safety): in the full stack the `worker` (the only service that runs scan
+# engines) is the ONLY container with internet egress, and it reaches targets through the
+# scope-enforcing egress gateway. postgres/redis stay on an internal network.
+name: orvex
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: orvex
+      POSTGRES_DB: orvex
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Gate 3 — egress firewall. Sits between the worker and the internet: default-DROP, allows
+  # only per-run in-scope destination IPs (see infra/egress). NET_ADMIN is required to program
+  # nftables; it never gets --privileged.
+  egress-gateway:
+    build:
+      context: ..
+      dockerfile: infra/egress/Dockerfile
+    cap_add: ["NET_ADMIN"]
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    volumes:
+      - allowlist:/run/orvex
+    networks:
+      internal: {}
+      egress: {}   # the only path to the internet
+    restart: unless-stopped
+
+  # The worker is the ONLY service that runs scan engines. It is attached to the internal,
+  # no-internet network; its default route is the egress gateway. cap_drop ALL, add only
+  # NET_RAW (for connect/SYN scans); never --privileged.
+  worker:
+    build:
+      context: ..
+      dockerfile: engines/Dockerfile.worker
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      egress-gateway: {condition: service_started}
+    environment:
+      ORVEX_DATABASE_URL: postgresql+psycopg://orvex_app:orvex@postgres:5432/orvex
+      ORVEX_REDIS_URL: redis://redis:6379/0
+      ORVEX_SECRET_KEY: ${ORVEX_SECRET_KEY:-}
+    cap_drop: ["ALL"]
+    cap_add: ["NET_RAW"]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - allowlist:/run/orvex:ro
+    networks:
+      backplane: {}   # postgres/redis
+      internal: {}    # egress only via the gateway (no direct internet)
+    # Route all internet-bound traffic through the gateway (needs the gateway's internal IP).
+    # In production an init sets: ip route replace default via <egress-gateway internal ip>.
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: ..
+      dockerfile: engines/Dockerfile.worker
+    command: ["celery -A apps.worker.celery_app beat -l info"]
+    depends_on:
+      redis: {condition: service_healthy}
+    environment:
+      ORVEX_REDIS_URL: redis://redis:6379/0
+    networks:
+      backplane: {}
+    restart: unless-stopped
+
+networks:
+  backplane:      # postgres/redis + app services
+    driver: bridge
+  internal:       # worker <-> egress-gateway; NO internet route
+    driver: bridge
+    internal: true
+  egress:         # gateway -> internet
+    driver: bridge
+
+volumes:
+  pgdata:
+  allowlist:

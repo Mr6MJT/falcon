@@ -1,0 +1,76 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: orvex
+          POSTGRES_DB: orvex
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      ORVEX_ALEMBIC_URL: postgresql+psycopg://postgres:orvex@localhost:5432/orvex
+      ORVEX_TEST_OWNER_URL: postgresql+psycopg://postgres:orvex@localhost:5432/orvex
+      ORVEX_TEST_DB_URL: postgresql+psycopg://orvex_app:orvex@localhost:5432/orvex
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install pytest ruff mypy sqlalchemy alembic "psycopg[binary]" tldextract fastapi "uvicorn[standard]" pyjwt httpx websockets redis cryptography weasyprint celery
+
+      - name: no-subprocess-outside-guard gate
+        run: python scripts/check_no_subprocess.py
+
+      - name: create app role
+        run: |
+          PGPASSWORD=orvex psql -h localhost -U postgres -d orvex -v ON_ERROR_STOP=1 -c \
+            "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='orvex_app') THEN CREATE ROLE orvex_app LOGIN PASSWORD 'orvex' NOSUPERUSER NOBYPASSRLS; END IF; END \$\$;"
+
+      - name: alembic upgrade head
+        run: alembic upgrade head
+
+      - name: alembic drift check
+        run: alembic check
+
+      - name: tests (scope, guard, RLS, honesty)
+        run: python -m pytest -q
+
+      - name: lint
+        run: ruff check packages scripts tests apps
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+
+  worker-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build worker image (pinned engines + sha256 verify)
+        run: docker build -f engines/Dockerfile.worker -t orvex-worker:ci .
+      - name: engine smoke test (every tool --version)
+        run: docker run --rm orvex-worker:ci /usr/local/bin/orvex-smoke

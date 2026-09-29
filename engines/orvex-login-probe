@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""orvex-login-probe — safe login-page testing engine (bundled in the worker image).
+
+Brute-force-PROTECTION-exists + user-enumeration only. Uses a synthetic/operator-owned
+account, at most 5 attempts (also hard-capped by the guard), 1-2s apart, and asserts the
+presence of protection, never its absence. Emits JSON lines for the `login` stage.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+import time
+import urllib.error
+import urllib.request
+
+from packages.core.probes import login_bruteforce_protection, login_user_enumeration
+
+USER_AGENT = "orvex-login-probe/1.0 (+authorized-testing)"
+TIMEOUT = 10
+REAL_ACCOUNT = "orvex-operator@example.test"  # operator-owned synthetic account
+
+
+def fetch(url: str, method: str = "GET"):
+    time.sleep(1.5)  # gentle spacing between login attempts
+    req = urllib.request.Request(url, method=method, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:  # noqa: S310
+            body = r.read(100_000).decode("utf-8", "replace")
+            return r.status, {k.lower(): v for k, v in r.headers.items()}, body
+    except urllib.error.HTTPError as e:
+        body = e.read(100_000).decode("utf-8", "replace") if e.fp else ""
+        return e.code, {k.lower(): v for k, v in (e.headers or {}).items()}, body
+    except Exception:  # noqa: BLE001
+        return 0, {}, ""
+
+
+def parse_args(argv: list[str]) -> tuple[int, list[str]]:
+    attempts = 5
+    targets: list[str] = []
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--max-attempts" and i + 1 < len(argv):
+            attempts = min(5, int(argv[i + 1]))  # never above 5
+            i += 2
+            continue
+        targets.append(argv[i])
+        i += 1
+    return attempts, targets
+
+
+def main(argv: list[str]) -> int:
+    attempts, targets = parse_args(argv)
+    for url in targets:
+        bf = login_bruteforce_protection(url, fetch, max_attempts=attempts)
+        print(json.dumps(bf))
+        ue = login_user_enumeration(url, fetch, real_account=REAL_ACCOUNT)
+        print(json.dumps(ue))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

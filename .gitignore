@@ -1,0 +1,34 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+
+# Secrets & local env (NEVER commit)
+.env
+.env.*
+*.pem
+*.key
+secrets.*
+**/allow.v4
+**/allow.v6
+
+# Data / runtime
+*.log
+pgdata/
+*.sqlite
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

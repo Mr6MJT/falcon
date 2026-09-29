@@ -1,0 +1,29 @@
+[project]
+name = "orvex-core"
+version = "0.1.0"
+description = "Orvex Recon — authorized bug-bounty recon & vuln-scanning platform (safety core)"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11", "httpx", "websockets"]
+db = ["sqlalchemy>=2", "alembic>=1.13", "psycopg[binary]>=3.1"]
+api = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "pyjwt>=2.8", "weasyprint>=60"]
+full = ["tldextract>=5"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "RUF"]
+ignore = ["E402", "UP042"]  # E402: sys.path bootstrap; UP042: str,Enum is intentional
+
+[tool.ruff.lint.per-file-ignores]
+"packages/core/guard.py" = ["S404", "S603"]
+"tests/test_scope.py" = ["RUF001", "RUF002", "RUF003"]
+"apps/api/*.py" = ["B008"]  # FastAPI Depends() in argument defaults is idiomatic
+"packages/core/report.py" = ["E501"]  # inline HTML report template

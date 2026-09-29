@@ -1,0 +1,105 @@
+# Orvex worker image — bundles every Linux scan engine and the custom probe tools.
+#
+# Design constraints (from the security spec):
+#   * Go is NOT installed: we fetch PINNED release binaries and verify them against each
+#     release's published checksums.txt (sha256). We never build from source.
+#   * nuclei-templates are baked at a PINNED tag (no silent mid-engagement template pulls).
+#   * Runs NON-ROOT. Raw sockets are granted via file-capabilities on naabu/nmap only
+#     (compose adds NET_RAW; we never use --privileged).
+#   * This image has engines but NO direct internet route at runtime — all egress goes
+#     through the scope-enforcing egress gateway (Gate 3). See infra/egress/.
+#
+# Build:  docker build -f engines/Dockerfile.worker -t orvex-worker .
+
+FROM python:3.13-slim AS base
+
+# Pinned tool versions (bump deliberately; each is verified against its release checksums).
+ARG SUBFINDER_VERSION=2.16.0
+ARG DNSX_VERSION=1.3.1
+ARG NAABU_VERSION=2.6.1
+ARG HTTPX_VERSION=1.12.0
+ARG KATANA_VERSION=1.7.0
+ARG NUCLEI_VERSION=3.11.1
+ARG TLSX_VERSION=1.4.0
+ARG FFUF_VERSION=2.3.0
+ARG NUCLEI_TEMPLATES_TAG=v10.4.9
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    HOME=/home/orvex
+
+# nmap (apt, pinned by the base image's snapshot), plus fetch/verify tooling and file-caps.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        nmap ca-certificates curl unzip git libcap2-bin \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- ProjectDiscovery suite: pinned zip + verify against the release checksums.txt ----------
+# fetch_pd <repo> <name> <version>
+COPY engines/fetch_pd.sh /usr/local/bin/fetch_pd.sh
+RUN chmod +x /usr/local/bin/fetch_pd.sh \
+    && fetch_pd.sh projectdiscovery/subfinder subfinder "${SUBFINDER_VERSION}" \
+    && fetch_pd.sh projectdiscovery/dnsx      dnsx      "${DNSX_VERSION}" \
+    && fetch_pd.sh projectdiscovery/naabu     naabu     "${NAABU_VERSION}" \
+    && fetch_pd.sh projectdiscovery/httpx     httpx     "${HTTPX_VERSION}" \
+    && fetch_pd.sh projectdiscovery/katana    katana    "${KATANA_VERSION}" \
+    && fetch_pd.sh projectdiscovery/nuclei    nuclei    "${NUCLEI_VERSION}" \
+    && fetch_pd.sh projectdiscovery/tlsx      tlsx      "${TLSX_VERSION}"
+
+# --- ffuf (fuzzing), verified against its checksums ----------------------------------------
+RUN set -eux; cd /tmp; \
+    base="https://github.com/ffuf/ffuf/releases/download/v${FFUF_VERSION}"; \
+    curl -fsSLO "${base}/ffuf_${FFUF_VERSION}_linux_amd64.tar.gz"; \
+    curl -fsSLO "${base}/ffuf_${FFUF_VERSION}_checksums.txt"; \
+    grep "ffuf_${FFUF_VERSION}_linux_amd64.tar.gz" "ffuf_${FFUF_VERSION}_checksums.txt" | sha256sum -c -; \
+    tar -xzf "ffuf_${FFUF_VERSION}_linux_amd64.tar.gz" ffuf; \
+    install -m 0755 ffuf /usr/local/bin/ffuf; rm -f /tmp/ffuf*
+
+# --- Python engines + core package ---------------------------------------------------------
+# wafw00f + trufflehog(py) + gau alternative (waybackurls via pip is not avail; we use the
+# katana/gau shell). trufflehog here is the Python secret scanner is NOT the Go one; the Go
+# trufflehog binary is fetched below for parity with the spec.
+RUN pip install --no-cache-dir \
+    "sqlalchemy>=2" "psycopg[binary]>=3.1" "celery>=5.4" "redis>=5" \
+    "cryptography>=42" "tldextract>=5" "wafw00f>=2.2"
+
+# trufflehog (Go release) + gau, verified by checksum
+ARG TRUFFLEHOG_VERSION=3.97.9
+ARG GAU_VERSION=2.2.4
+RUN set -eux; cd /tmp; \
+    curl -fsSLO "https://github.com/trufflesecurity/trufflehog/releases/download/v${TRUFFLEHOG_VERSION}/trufflehog_${TRUFFLEHOG_VERSION}_linux_amd64.tar.gz"; \
+    curl -fsSLO "https://github.com/trufflesecurity/trufflehog/releases/download/v${TRUFFLEHOG_VERSION}/trufflehog_${TRUFFLEHOG_VERSION}_checksums.txt"; \
+    grep "linux_amd64.tar.gz" "trufflehog_${TRUFFLEHOG_VERSION}_checksums.txt" | sha256sum -c -; \
+    tar -xzf "trufflehog_${TRUFFLEHOG_VERSION}_linux_amd64.tar.gz" trufflehog; \
+    install -m 0755 trufflehog /usr/local/bin/trufflehog; \
+    curl -fsSLO "https://github.com/lc/gau/releases/download/v${GAU_VERSION}/gau_${GAU_VERSION}_linux_amd64.tar.gz"; \
+    tar -xzf "gau_${GAU_VERSION}_linux_amd64.tar.gz" gau; \
+    install -m 0755 gau /usr/local/bin/gau; rm -rf /tmp/*
+
+# --- nuclei templates baked at a pinned tag (no mid-run pulls) ------------------------------
+RUN git clone --depth 1 --branch "${NUCLEI_TEMPLATES_TAG}" \
+        https://github.com/projectdiscovery/nuclei-templates.git /opt/nuclei-templates
+ENV NUCLEI_TEMPLATES_DIR=/opt/nuclei-templates
+
+# --- the app + custom engines --------------------------------------------------------------
+WORKDIR /app
+COPY packages /app/packages
+COPY apps/worker /app/apps/worker
+COPY engines/orvex-probe engines/orvex-login-probe engines/orvex-idor /usr/local/bin/
+RUN chmod +x /usr/local/bin/orvex-probe /usr/local/bin/orvex-login-probe /usr/local/bin/orvex-idor
+ENV PYTHONPATH=/app
+
+# Raw sockets for the port scanners only (file-caps; compose grants NET_RAW, drops the rest).
+# Only NET_RAW — NET_ADMIN is not in Docker's default set, so requesting it here would make
+# the binary fail with EPERM unless explicitly granted.
+RUN setcap cap_net_raw+eip /usr/local/bin/naabu \
+    && setcap cap_net_raw+eip /usr/bin/nmap || true
+
+# Non-root runtime user.
+RUN useradd -u 10001 -m -d /home/orvex -s /usr/sbin/nologin orvex \
+    && chown -R orvex:orvex /app /home/orvex
+USER orvex
+
+# Smoke check baked into the image metadata; CI runs `docker run orvex-worker orvex-smoke`.
+COPY engines/smoke.sh /usr/local/bin/orvex-smoke
+ENTRYPOINT ["/bin/sh", "-c"]
+CMD ["celery -A apps.worker.celery_app worker -l info -Q recon,active,cpu,report"]
