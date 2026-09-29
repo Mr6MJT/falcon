@@ -16,9 +16,11 @@ def _scope():
     return [ScopeRule.make(RuleKind.WILDCARD, RuleAction.INCLUDE, "*.lab.local")]
 
 
-def _fake_runner(recorded):
-    def runner(cmd, timeout_s):
+def _fake_runner(recorded, stdin_seen=None):
+    def runner(cmd, timeout_s, stdin_data=None):
         recorded.append(cmd)
+        if stdin_seen is not None:
+            stdin_seen.append(stdin_data)
         # Pretend the tool printed a live-looking AWS key; guard must redact it.
         return 0, "found AKIAIOSFODNN7EXAMPLE in config", ""
     return runner
@@ -80,3 +82,21 @@ def test_safe_profile_appends_native_rate_flags():
     run_tool("nuclei", ["api.lab.local"], _scope(),
              profile=RateProfile.SAFE, _runner=_fake_runner(recorded))
     assert "-rate-limit" in recorded[0]
+
+
+def test_projectdiscovery_targets_go_to_stdin_not_argv():
+    """PD engines read targets from stdin; they must NOT be appended as positional args."""
+    recorded, stdin_seen = [], []
+    run_tool("dnsx", ["a.lab.local", "b.lab.local"], _scope(),
+             _runner=_fake_runner(recorded, stdin_seen))
+    assert "a.lab.local" not in recorded[0]  # not on the command line
+    assert stdin_seen[0] == "a.lab.local\nb.lab.local\n"  # piped via stdin
+
+
+def test_bespoke_cli_targets_stay_positional():
+    """wafw00f takes its URL positionally and gets no stdin payload."""
+    recorded, stdin_seen = [], []
+    run_tool("wafw00f", ["api.lab.local"], _scope(),
+             _runner=_fake_runner(recorded, stdin_seen))
+    assert recorded[0][-1] == "api.lab.local"  # positional
+    assert stdin_seen[0] is None

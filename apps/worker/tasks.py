@@ -13,6 +13,7 @@ publisher — this is where the worker's egress actually happens, through Gate 3
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 
 from celery import shared_task
 from sqlalchemy import select
@@ -21,10 +22,10 @@ from packages.core.cancel import RedisCancelFlag
 from packages.core.db import make_engine, make_session_factory, org_session
 from packages.core.events import RedisEventBus, ScanEventPublisher
 from packages.core.gate1 import compile_scope
-from packages.core.models import Scan, ScopeRule
+from packages.core.models import Scan, ScanStage, ScanStatus, ScopeRule, StageStatus
 from packages.core.orchestrator import execute_stage
 from packages.core.pipeline import advance_scan as _advance
-from packages.core.pipeline import seed_stages
+from packages.core.pipeline import is_terminal, seed_stages
 from packages.core.stages import StageContext
 
 _session_factory = None
@@ -69,7 +70,29 @@ def start_scan(scan_id: str, org_id: str) -> None:
     with org_session(_factory(), org_id) as session:
         scan = session.get(Scan, scan_id)
         seed_stages(session, scan)
+        # Flip pending -> running so the UI reflects an active scan (the inline runner does
+        # this too; the distributed path must not diverge).
+        scan.status = ScanStatus.RUNNING
+        scan.started_at = scan.started_at or datetime.now(UTC)
+        _bus and ScanEventPublisher(_bus, scan.id).scan_status(ScanStatus.RUNNING.value)
     advance_scan.delay(scan_id, org_id)
+
+
+def _finalize_if_terminal(session, scan_id: str) -> None:
+    """Once no stage can make further progress, roll the DAG state up onto the scan."""
+    if not is_terminal(session, scan_id):
+        return
+    scan = session.get(Scan, scan_id)
+    if scan is None or scan.status in (ScanStatus.COMPLETED, ScanStatus.FAILED,
+                                       ScanStatus.CANCELLED):
+        return
+    rows = session.execute(
+        select(ScanStage).where(ScanStage.scan_id == scan_id)
+    ).scalars().all()
+    any_failed = any(r.status == StageStatus.FAILED for r in rows)
+    scan.status = ScanStatus.FAILED if any_failed else ScanStatus.COMPLETED
+    scan.finished_at = datetime.now(UTC)
+    _bus and ScanEventPublisher(_bus, scan.id).scan_status(scan.status.value)
 
 
 @shared_task(name="orvex.advance_scan")
@@ -78,6 +101,8 @@ def advance_scan(scan_id: str, org_id: str) -> list[str]:
         result = _advance(
             session, scan_id, lambda name: run_stage.delay(scan_id, org_id, name)
         )
+        if result.terminal and not result.dispatched:
+            _finalize_if_terminal(session, scan_id)
         return result.dispatched
 
 
