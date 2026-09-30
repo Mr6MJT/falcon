@@ -1,0 +1,7 @@
+# If the host uses Caddy instead of nginx, add this block (Caddy auto-issues TLS).
+falcon.orvex.services {
+    handle_path /api/* {
+        reverse_proxy 127.0.0.1:8096
+    }
+    reverse_proxy 127.0.0.1:8095
+}

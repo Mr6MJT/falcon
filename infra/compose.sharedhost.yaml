@@ -1,0 +1,21 @@
+# Shared-host overlay — run Falcon ALONGSIDE existing sites on a box that already has a
+# reverse proxy (nginx/Caddy/Apache) terminating TLS for other subdomains.
+#
+#   docker compose --env-file infra/.env \
+#     -f infra/compose.prod.yaml -f infra/compose.sharedhost.yaml up -d --build
+#
+# Differences from compose.prod.yaml:
+#   * Caddy is disabled (parked in an unused profile) — your existing proxy fronts the subdomain.
+#   * web + api are published on LOOPBACK ONLY, so nothing new is exposed publicly.
+#     Point your reverse proxy's falcon.orvex.services vhost at these:
+#       /api/  -> http://127.0.0.1:8096/   (strip the /api prefix)
+#       /      -> http://127.0.0.1:8095    (with WebSocket upgrade for /ws)
+services:
+  caddy:
+    profiles: ["disabled"]        # excluded from `up` — host proxy handles TLS/routing
+  web:
+    ports:
+      - "127.0.0.1:8095:3000"
+  api:
+    ports:
+      - "127.0.0.1:8096:8000"
