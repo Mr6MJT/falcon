@@ -38,3 +38,6 @@ infra/subfinder-provider-config.yaml
 
 # downloaded wordlists (large; fetch via SecLists)
 infra/wordlists/
+
+# ...but the example template IS tracked (no secrets in it)
+!infra/.env.example
