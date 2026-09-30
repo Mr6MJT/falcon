@@ -3,7 +3,7 @@ import type { Locale } from "./config";
 // Flat message dictionaries. Keys are shared across locales; `MessageKey` is derived from
 // the English dictionary so missing keys in other locales are caught at compile time.
 const en = {
-  "app.name": "Orvex Recon",
+  "app.name": "Falcon",
   "app.tagline": "Authorized bug-bounty recon & scanning",
   "nav.dashboard": "Dashboard",
   "nav.programs": "Programs",
@@ -108,7 +108,7 @@ export type MessageKey = keyof typeof en;
 type Dict = Record<MessageKey, string>;
 
 const fr: Dict = {
-  "app.name": "Orvex Recon",
+  "app.name": "Falcon",
   "app.tagline": "Reconnaissance et analyse autorisées (bug bounty)",
   "nav.dashboard": "Tableau de bord",
   "nav.programs": "Programmes",
@@ -210,7 +210,7 @@ const fr: Dict = {
 };
 
 const ar: Dict = {
-  "app.name": "Orvex Recon",
+  "app.name": "Falcon",
   "app.tagline": "استطلاع وفحص مُصرَّح به (مكافآت الثغرات)",
   "nav.dashboard": "لوحة التحكم",
   "nav.programs": "البرامج",

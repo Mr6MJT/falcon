@@ -65,13 +65,13 @@ export default function ProgramsPage() {
   }
 
   const field =
-    "w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm";
+    "w-full rounded-md border border-line bg-white/[0.02] px-3 py-2 text-sm";
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <h1 className="text-2xl font-semibold">{t("programs.title")}</h1>
 
-      <form onSubmit={create} className="space-y-3 rounded-lg border border-neutral-800 p-4">
+      <form onSubmit={create} className="space-y-3 rounded-lg border border-line p-4">
         <div className="text-sm font-medium">{t("programs.new")}</div>
         <input value={name} onChange={(e) => setName(e.target.value)}
                placeholder={t("programs.name")} className={field} />
@@ -83,22 +83,22 @@ export default function ProgramsPage() {
         </div>
 
         <label className="block text-sm">
-          <span className="text-neutral-300">{t("programs.scope")}</span>
+          <span className="text-ink">{t("programs.scope")}</span>
           <textarea value={scopeText} onChange={(e) => setScopeText(e.target.value)} rows={4}
                     placeholder={"*.deriv.ae\nderiv.exchange\n*end.api.deriv.com"}
                     className={`${field} font-mono`} />
-          <span className="text-xs text-neutral-500">{t("programs.scopeHint")}</span>
+          <span className="text-xs text-ink-muted">{t("programs.scopeHint")}</span>
         </label>
 
         <label className="block text-sm">
-          <span className="text-neutral-300">{t("programs.outScope")}</span>
+          <span className="text-ink">{t("programs.outScope")}</span>
           <textarea value={outScopeText} onChange={(e) => setOutScopeText(e.target.value)} rows={2}
                     placeholder={"admin.deriv.ae\ninternal.deriv.ae"}
                     className={`${field} font-mono`} />
         </label>
 
-        <div className="rounded-md border border-neutral-800 p-3">
-          <div className="text-xs font-medium text-neutral-300">{t("programs.authTitle")}</div>
+        <div className="rounded-md border border-line p-3">
+          <div className="text-xs font-medium text-ink">{t("programs.authTitle")}</div>
           <input value={authorizedBy} onChange={(e) => setAuthorizedBy(e.target.value)}
                  placeholder={t("programs.authorizedBy")} className={`${field} mt-2`} />
           <label className="mt-2 flex items-center gap-2 text-sm">
@@ -106,11 +106,11 @@ export default function ProgramsPage() {
                    onChange={(e) => setAllowActive(e.target.checked)} />
             <span>{t("programs.allowActive")}</span>
           </label>
-          <p className="mt-1 text-xs text-neutral-500">{t("programs.authHint")}</p>
+          <p className="mt-1 text-xs text-ink-muted">{t("programs.authHint")}</p>
         </div>
 
         <button type="submit" disabled={busy || !canCreate}
-                className="rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 disabled:opacity-40">
+                className="rounded-md bg-brand-gradient px-4 py-2 text-sm font-medium text-surface-sunken disabled:opacity-40">
           {t("programs.create")}
         </button>
         {!canCreate && (
@@ -125,21 +125,21 @@ export default function ProgramsPage() {
       )}
 
       {programs.length === 0 ? (
-        <p className="text-sm text-neutral-500">{t("programs.empty")}</p>
+        <p className="text-sm text-ink-muted">{t("programs.empty")}</p>
       ) : (
-        <ul className="divide-y divide-neutral-800 rounded-lg border border-neutral-800">
+        <ul className="divide-y divide-line rounded-lg border border-line">
           {programs.map((p) => (
             <li key={p.id} className="flex items-center justify-between gap-3 p-3">
               <div className="min-w-0">
                 <div className="text-sm font-medium">{p.name}</div>
-                <div className="text-xs text-neutral-500">{p.platform || "—"}</div>
+                <div className="text-xs text-ink-muted">{p.platform || "—"}</div>
               </div>
               <span
                 className={
                   "shrink-0 rounded px-2 py-0.5 text-[10px] uppercase " +
                   (p.allows_active_testing
                     ? "bg-emerald-950 text-emerald-300"
-                    : "bg-neutral-800 text-neutral-400")
+                    : "bg-white/[0.05] text-ink-muted")
                 }
               >
                 {p.allows_active_testing ? t("programs.activeOn") : t("programs.activeOff")}

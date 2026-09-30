@@ -27,44 +27,45 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="mx-auto max-w-sm space-y-6 pt-10">
-      <div>
-        <h1 className="text-2xl font-semibold">{t("auth.title")}</h1>
-        <p className="mt-1 text-sm text-neutral-400">{t("auth.tokenHint")}</p>
+    <div className="mx-auto max-w-sm pt-6 md:pt-16">
+      <div className="mb-6 text-center">
+        <span className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-brand-gradient shadow-glow">
+          <svg viewBox="0 0 24 24" className="h-6 w-6 text-surface-sunken" fill="currentColor">
+            <path d="M12 2l8 4.5v5c0 4.6-3.1 8.4-8 10-4.9-1.6-8-5.4-8-10v-5L12 2zm0 3.2L7 8v3.4c0 2.9 1.9 5.4 5 6.6 3.1-1.2 5-3.7 5-6.6V8l-5-2.8z" />
+          </svg>
+        </span>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("auth.title")}</h1>
+        <p className="mt-1 text-sm text-ink-muted">{t("auth.tokenHint")}</p>
       </div>
-      <form onSubmit={signIn} className="space-y-3 rounded-lg border border-neutral-800 p-5">
+      <form onSubmit={signIn} className="card space-y-4">
         <label className="block text-sm">
-          <span className="text-neutral-300">{t("auth.email")}</span>
+          <span className="text-ink-muted">{t("auth.email")}</span>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             autoFocus
             autoComplete="username"
-            className="mt-1 w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm"
+            className="input mt-1.5"
           />
         </label>
         <label className="block text-sm">
-          <span className="text-neutral-300">{t("auth.password")}</span>
+          <span className="text-ink-muted">{t("auth.password")}</span>
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
-            className="mt-1 w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm"
+            className="input mt-1.5"
           />
         </label>
         {error && (
-          <div className="rounded-md border border-rose-900 bg-rose-950 p-2 text-xs text-rose-300">
+          <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-300">
             {error}
           </div>
         )}
-        <button
-          type="submit"
-          disabled={busy || !email.trim() || !password}
-          className="w-full rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 disabled:opacity-40"
-        >
-          {t("auth.signIn")}
+        <button type="submit" disabled={busy || !email.trim() || !password} className="btn-primary w-full">
+          {busy ? "…" : t("auth.signIn")}
         </button>
       </form>
     </div>

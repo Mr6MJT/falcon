@@ -44,7 +44,7 @@ export default function AssetsPage() {
     <div className="mx-auto max-w-5xl space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">{t("assets.title")}</h1>
-        <Link href={`/${locale}/scans/${scanId}`} className="text-xs text-neutral-400 underline hover:text-neutral-200">
+        <Link href={`/${locale}/scans/${scanId}`} className="text-xs text-ink-muted underline hover:text-ink">
           ← {t("scan.title")}
         </Link>
       </div>
@@ -56,7 +56,7 @@ export default function AssetsPage() {
             onClick={() => setKind(k)}
             className={
               "rounded-md px-3 py-1.5 text-xs " +
-              (k === kind ? "bg-neutral-100 text-neutral-900" : "bg-neutral-900 text-neutral-400 hover:bg-neutral-800")
+              (k === kind ? "bg-brand-gradient text-surface-sunken" : "bg-white/[0.02] text-ink-muted hover:bg-white/[0.06]")
             }
           >
             {k.replace(/_/g, " ")}
@@ -71,17 +71,17 @@ export default function AssetsPage() {
       )}
 
       {loading ? (
-        <p className="text-sm text-neutral-500">…</p>
+        <p className="text-sm text-ink-muted">…</p>
       ) : page && page.items.length > 0 ? (
-        <div className="overflow-x-auto rounded-lg border border-neutral-800">
-          <div className="border-b border-neutral-800 px-3 py-2 text-xs text-neutral-500">
+        <div className="overflow-x-auto rounded-lg border border-line">
+          <div className="border-b border-line px-3 py-2 text-xs text-ink-muted">
             {page.total} {page.kind.replace(/_/g, " ")}
           </div>
           <table className="w-full text-sm">
             <thead>
               <tr className="text-start">
                 {page.columns.map((c) => (
-                  <th key={c} className="border-b border-neutral-900 px-3 py-2 text-start text-xs uppercase text-neutral-500">
+                  <th key={c} className="border-b border-line px-3 py-2 text-start text-xs uppercase text-ink-muted">
                     {c.replace(/_/g, " ")}
                   </th>
                 ))}
@@ -89,7 +89,7 @@ export default function AssetsPage() {
             </thead>
             <tbody>
               {page.items.map((row, i) => (
-                <tr key={i} className="border-b border-neutral-900 hover:bg-neutral-900/50">
+                <tr key={i} className="border-b border-line hover:bg-white/[0.04]">
                   {page.columns.map((c) => (
                     <td key={c} className="px-3 py-1.5 font-mono text-xs">
                       {formatCell(row[c])}
@@ -101,7 +101,7 @@ export default function AssetsPage() {
           </table>
         </div>
       ) : (
-        <p className="text-sm text-neutral-500">{t("assets.empty")}</p>
+        <p className="text-sm text-ink-muted">{t("assets.empty")}</p>
       )}
     </div>
   );
