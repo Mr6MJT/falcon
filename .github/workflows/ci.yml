@@ -39,7 +39,15 @@ jobs:
       - name: alembic drift check
         run: alembic check
 
-      - name: tests (scope, guard, RLS, honesty)
+      - name: install ProjectDiscovery httpx (for the e2e engine tests)
+        run: |
+          curl -fsSL -o /tmp/httpx.zip \
+            https://github.com/projectdiscovery/httpx/releases/download/v1.6.9/httpx_1.6.9_linux_amd64.zip
+          sudo unzip -o /tmp/httpx.zip httpx -d /usr/local/bin
+          sudo chmod +x /usr/local/bin/httpx
+          httpx -version
+
+      - name: tests (scope, guard, RLS, honesty + real-engine e2e)
         run: python -m pytest -q
 
       - name: lint
