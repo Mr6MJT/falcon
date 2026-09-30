@@ -114,10 +114,10 @@ export default function NewScanWizard() {
             className={
               "rounded-full px-3 py-1 " +
               (i === step
-                ? "bg-neutral-100 text-neutral-900"
+                ? "bg-brand-gradient text-surface-sunken"
                 : i < step
-                  ? "bg-neutral-800 text-neutral-300"
-                  : "bg-neutral-900 text-neutral-600")
+                  ? "bg-white/[0.05] text-ink"
+                  : "bg-white/[0.02] text-ink-faint")
             }
           >
             {i + 1}. {t(k)}
@@ -125,18 +125,18 @@ export default function NewScanWizard() {
         ))}
       </ol>
 
-      <div className="rounded-lg border border-neutral-800 p-5">
+      <div className="rounded-lg border border-line p-5">
         {step === 0 && (
           <div className="space-y-4">
             <label className="block text-sm">
-              <span className="text-neutral-300">{t("wizard.program")}</span>
+              <span className="text-ink">{t("wizard.program")}</span>
               {programs.length === 0 ? (
                 <p className="mt-1 text-xs text-amber-400">{t("wizard.program.none")}</p>
               ) : (
                 <select
                   value={programId}
                   onChange={(e) => onSelectProgram(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-md border border-line bg-white/[0.02] px-3 py-2 text-sm"
                 >
                   <option value="">{t("wizard.program.select")}</option>
                   {programs.map((p) => (
@@ -156,27 +156,27 @@ export default function NewScanWizard() {
               )}
             </label>
             <label className="block text-sm">
-              <span className="text-neutral-300">{t("wizard.domains.label")}</span>
+              <span className="text-ink">{t("wizard.domains.label")}</span>
               <textarea
               value={domainText}
               onChange={(e) => onDomains(e.target.value)}
               rows={5}
               placeholder={"example.com\napi.example.com"}
-              className="mt-1 w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 font-mono text-sm"
+              className="mt-1 w-full rounded-md border border-line bg-white/[0.02] px-3 py-2 font-mono text-sm"
             />
-              <p className="mt-2 text-xs text-neutral-500">{t("wizard.domains.help")}</p>
+              <p className="mt-2 text-xs text-ink-muted">{t("wizard.domains.help")}</p>
             </label>
           </div>
         )}
 
         {step === 1 && (
           <div className="space-y-3 text-sm">
-            <p className="text-xs text-neutral-500">{t("wizard.scope.help")}</p>
+            <p className="text-xs text-ink-muted">{t("wizard.scope.help")}</p>
             <ul className="space-y-1">
               {state.scopeRules.map((r, i) => (
                 <li
                   key={`${r.value}-${i}`}
-                  className="flex items-center justify-between rounded-md border border-neutral-800 px-3 py-2"
+                  className="flex items-center justify-between rounded-md border border-line px-3 py-2"
                 >
                   <span className="font-mono text-xs">{r.value}</span>
                   <span
@@ -190,7 +190,7 @@ export default function NewScanWizard() {
                 </li>
               ))}
               {state.scopeRules.length === 0 && (
-                <li className="text-xs text-neutral-500">{t("wizard.domains.help")}</li>
+                <li className="text-xs text-ink-muted">{t("wizard.domains.help")}</li>
               )}
             </ul>
           </div>
@@ -207,8 +207,8 @@ export default function NewScanWizard() {
                   className={
                     "rounded-md border px-3 py-2 text-start text-xs " +
                     (state.aggressiveness === a
-                      ? "border-neutral-400 bg-neutral-800"
-                      : "border-neutral-800")
+                      ? "border-brand/60 bg-brand/10"
+                      : "border-line")
                   }
                 >
                   {t(`wizard.aggr.${a}`)}
@@ -231,7 +231,7 @@ export default function NewScanWizard() {
               />
               <span>{t("wizard.aggr.fuzzing")}</span>
             </label>
-            <p className="text-xs text-neutral-500">{t("wizard.aggr.help")}</p>
+            <p className="text-xs text-ink-muted">{t("wizard.aggr.help")}</p>
             {!stepOk && (
               <p className="text-xs text-amber-400">{t("wizard.aggr.help")}</p>
             )}
@@ -251,7 +251,7 @@ export default function NewScanWizard() {
           type="button"
           onClick={() => setStep((s) => Math.max(0, s - 1))}
           disabled={step === 0}
-          className="rounded-md border border-neutral-700 px-4 py-2 text-sm disabled:opacity-40"
+          className="rounded-md border border-line-strong px-4 py-2 text-sm disabled:opacity-40"
         >
           {t("common.back")}
         </button>
@@ -261,7 +261,7 @@ export default function NewScanWizard() {
             type="button"
             onClick={() => setStep((s) => s + 1)}
             disabled={!stepOk}
-            className="rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 disabled:opacity-40"
+            className="rounded-md bg-brand-gradient px-4 py-2 text-sm font-medium text-surface-sunken disabled:opacity-40"
           >
             {t("common.next")}
           </button>
@@ -271,7 +271,7 @@ export default function NewScanWizard() {
             onClick={onStart}
             disabled={!startReady || submitting}
             title={startReady ? undefined : t("wizard.startDisabled")}
-            className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-neutral-950 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500"
+            className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-surface-sunken disabled:cursor-not-allowed disabled:bg-white/[0.05] disabled:text-ink-muted"
           >
             {t("wizard.start")}
           </button>

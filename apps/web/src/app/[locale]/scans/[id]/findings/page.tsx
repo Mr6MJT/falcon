@@ -55,7 +55,7 @@ export default function FindingsPage() {
         <select
           value={confidenceFilter}
           onChange={(e) => setConfidenceFilter(e.target.value)}
-          className="rounded-md border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-sm"
+          className="rounded-md border border-line bg-white/[0.02] px-3 py-1.5 text-sm"
         >
           <option value="">{t("findings.all")}</option>
           <option value="confirmed">confirmed</option>
@@ -71,28 +71,28 @@ export default function FindingsPage() {
       )}
 
       {findings.length === 0 ? (
-        <p className="text-sm text-neutral-500">{t("findings.empty")}</p>
+        <p className="text-sm text-ink-muted">{t("findings.empty")}</p>
       ) : (
         <div className="space-y-6">
           {SEV_ORDER.filter((s) => grouped[s]?.length).map((sev) => (
             <section key={sev}>
               <div className="mb-2 flex items-center gap-2">
                 <SeverityBadge severity={sev} />
-                <span className="text-xs text-neutral-500">{grouped[sev].length}</span>
+                <span className="text-xs text-ink-muted">{grouped[sev].length}</span>
               </div>
-              <ul className="divide-y divide-neutral-900 rounded-lg border border-neutral-800">
+              <ul className="divide-y divide-line rounded-lg border border-line">
                 {grouped[sev].map((f) => (
                   <li key={f.id}>
                     <button
                       onClick={() => setSelected(f)}
-                      className="flex w-full items-center gap-3 p-3 text-start hover:bg-neutral-900"
+                      className="flex w-full items-center gap-3 p-3 text-start hover:bg-white/[0.04]"
                     >
                       <span className="flex-1 truncate text-sm">{f.title}</span>
                       {f.cve_id && (
-                        <span className="font-mono text-xs text-neutral-500">{f.cve_id}</span>
+                        <span className="font-mono text-xs text-ink-muted">{f.cve_id}</span>
                       )}
                       <ConfidenceTag confidence={f.confidence} />
-                      <span className="w-24 shrink-0 text-end text-xs text-neutral-500">
+                      <span className="w-24 shrink-0 text-end text-xs text-ink-muted">
                         {f.status}
                       </span>
                     </button>

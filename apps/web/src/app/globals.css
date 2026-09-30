@@ -2,5 +2,109 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: dark; }
-body { @apply bg-neutral-950 text-neutral-100 antialiased; }
+:root {
+  color-scheme: dark;
+  --brand: 34 211 238;
+  --brand-2: 99 102 241;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-surface text-ink font-sans;
+    min-height: 100vh;
+    background-color: #070809;
+    background-image:
+      radial-gradient(900px 500px at 12% -8%, rgba(34, 211, 238, 0.10), transparent 60%),
+      radial-gradient(1000px 600px at 100% 0%, rgba(99, 102, 241, 0.12), transparent 55%),
+      radial-gradient(700px 500px at 50% 120%, rgba(56, 189, 248, 0.06), transparent 60%);
+    background-attachment: fixed;
+  }
+  ::selection {
+    background: rgba(34, 211, 238, 0.28);
+    color: #fff;
+  }
+  /* Refined scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.22);
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  /* Glass panel — the primary surface */
+  .card {
+    @apply rounded-xl2 border border-line bg-white/[0.025] p-5 shadow-panel backdrop-blur-sm;
+  }
+  .card-hover {
+    @apply transition-all duration-200 hover:border-line-strong hover:bg-white/[0.04] hover:shadow-lift;
+  }
+  .panel {
+    @apply rounded-xl border border-line bg-white/[0.02];
+  }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply btn text-surface-sunken;
+    background-image: linear-gradient(135deg, #34d3f0 0%, #6366f1 100%);
+    box-shadow: 0 8px 24px -10px rgba(34, 211, 238, 0.5);
+  }
+  .btn-primary:hover:not(:disabled) {
+    box-shadow: 0 10px 30px -8px rgba(34, 211, 238, 0.65);
+    filter: brightness(1.06);
+  }
+  .btn-ghost {
+    @apply btn border border-line bg-white/[0.02] text-ink hover:border-line-strong hover:bg-white/[0.05];
+  }
+
+  /* Inputs */
+  .input {
+    @apply w-full rounded-lg border border-line bg-black/30 px-3 py-2 text-sm text-ink placeholder:text-ink-faint transition-colors focus:border-brand/50 focus:outline-none focus:ring-1 focus:ring-brand/30;
+  }
+
+  /* Small labels / chips / mono data */
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-line bg-white/[0.03] px-2.5 py-0.5 text-xs text-ink-muted;
+  }
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-faint;
+  }
+  .mono {
+    @apply font-mono text-[0.85em] tracking-tight;
+  }
+
+  /* Gradient brand text */
+  .gradient-text {
+    @apply bg-brand-gradient bg-clip-text text-transparent;
+  }
+}
+
+@layer utilities {
+  .grid-overlay {
+    background-image: theme("backgroundImage.grid-faint");
+    background-size: 44px 44px;
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+}

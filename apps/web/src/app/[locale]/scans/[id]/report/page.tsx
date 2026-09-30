@@ -47,13 +47,13 @@ export default function ReportPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">{t("report.title")}</h1>
         <div className="flex gap-2">
-          <button onClick={() => dl("pdf")} className="rounded-md bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-900">
+          <button onClick={() => dl("pdf")} className="rounded-md bg-brand-gradient px-3 py-1.5 text-sm font-medium text-surface-sunken">
             PDF
           </button>
-          <button onClick={() => dl("html")} className="rounded-md border border-neutral-700 px-3 py-1.5 text-sm">
+          <button onClick={() => dl("html")} className="rounded-md border border-line-strong px-3 py-1.5 text-sm">
             HTML
           </button>
-          <button onClick={() => dl("json")} className="rounded-md border border-neutral-700 px-3 py-1.5 text-sm">
+          <button onClick={() => dl("json")} className="rounded-md border border-line-strong px-3 py-1.5 text-sm">
             JSON
           </button>
         </div>
@@ -67,46 +67,46 @@ export default function ReportPage() {
 
       {rep && (
         <>
-          <div className="text-sm text-neutral-400">
+          <div className="text-sm text-ink-muted">
             {rep.scan.program} · {rep.scan.status} ·{" "}
             <span className="font-mono text-xs">{rep.scan.scope_snapshot_hash?.slice(0, 16)}…</span>
           </div>
 
           <section>
-            <h2 className="mb-2 text-sm font-medium text-neutral-300">{t("report.bySeverity")}</h2>
+            <h2 className="mb-2 text-sm font-medium text-ink">{t("report.bySeverity")}</h2>
             <div className="grid grid-cols-5 gap-2">
               {SEV_ORDER.map((s) => (
-                <div key={s} className="rounded-lg border border-neutral-800 p-3 text-center">
+                <div key={s} className="rounded-lg border border-line p-3 text-center">
                   <div className="text-2xl font-semibold" style={{ color: SEV_COLOR[s] }}>
                     {rep.summary.by_severity[s] ?? 0}
                   </div>
-                  <div className="text-xs uppercase text-neutral-500">{s}</div>
+                  <div className="text-xs uppercase text-ink-muted">{s}</div>
                 </div>
               ))}
             </div>
           </section>
 
           <section>
-            <h2 className="mb-2 text-sm font-medium text-neutral-300">{t("report.byConfidence")}</h2>
+            <h2 className="mb-2 text-sm font-medium text-ink">{t("report.byConfidence")}</h2>
             <div className="grid grid-cols-3 gap-2">
               {(["confirmed", "candidate", "informational"] as const).map((c) => (
-                <div key={c} className="rounded-lg border border-neutral-800 p-3 text-center">
+                <div key={c} className="rounded-lg border border-line p-3 text-center">
                   <div className="text-2xl font-semibold tabular-nums">
                     {rep.summary.by_confidence[c] ?? 0}
                   </div>
-                  <div className="text-xs uppercase text-neutral-500">{c}</div>
+                  <div className="text-xs uppercase text-ink-muted">{c}</div>
                 </div>
               ))}
             </div>
           </section>
 
           <section>
-            <h2 className="mb-2 text-sm font-medium text-neutral-300">{t("report.assets")}</h2>
+            <h2 className="mb-2 text-sm font-medium text-ink">{t("report.assets")}</h2>
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
               {Object.entries(rep.summary.assets).map(([k, v]) => (
-                <div key={k} className="rounded-lg border border-neutral-800 p-3">
+                <div key={k} className="rounded-lg border border-line p-3">
                   <div className="text-xl font-semibold tabular-nums">{v}</div>
-                  <div className="text-xs capitalize text-neutral-500">{k.replace(/_/g, " ")}</div>
+                  <div className="text-xs capitalize text-ink-muted">{k.replace(/_/g, " ")}</div>
                 </div>
               ))}
             </div>

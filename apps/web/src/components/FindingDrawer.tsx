@@ -19,8 +19,8 @@ function Evidence({ label, value }: { label: string; value: unknown }) {
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   return (
     <div>
-      <div className="mb-1 text-xs font-medium text-neutral-400">{label}</div>
-      <pre className="max-h-60 overflow-auto rounded-md border border-neutral-800 bg-neutral-950 p-3 text-xs">
+      <div className="mb-1 text-xs font-medium text-ink-muted">{label}</div>
+      <pre className="max-h-60 overflow-auto rounded-md border border-line bg-surface-sunken p-3 text-xs">
         {text}
       </pre>
     </div>
@@ -46,7 +46,7 @@ export function FindingDrawer({
         className="flex-1 bg-black/60"
         onClick={onClose}
       />
-      <div className="flex h-full w-full max-w-xl flex-col gap-4 overflow-auto border-s border-neutral-800 bg-neutral-900 p-5">
+      <div className="flex h-full w-full max-w-xl flex-col gap-4 overflow-auto border-s border-line bg-white/[0.02] p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -54,11 +54,11 @@ export function FindingDrawer({
               <ConfidenceTag confidence={finding.confidence} />
             </div>
             <h2 className="mt-2 text-lg font-semibold">{finding.title}</h2>
-            <div className="mt-1 font-mono text-xs text-neutral-500">{finding.type}</div>
+            <div className="mt-1 font-mono text-xs text-ink-muted">{finding.type}</div>
           </div>
           <button
             onClick={onClose}
-            className="rounded-md border border-neutral-700 px-3 py-1 text-sm"
+            className="rounded-md border border-line-strong px-3 py-1 text-sm"
           >
             {t("common.close")}
           </button>
@@ -73,19 +73,19 @@ export function FindingDrawer({
         <div className="grid grid-cols-2 gap-2 text-sm">
           {finding.cve_id && (
             <div>
-              <span className="text-neutral-500">CVE </span>
+              <span className="text-ink-muted">CVE </span>
               {finding.cve_id}
             </div>
           )}
           {finding.cvss != null && (
             <div>
-              <span className="text-neutral-500">CVSS </span>
+              <span className="text-ink-muted">CVSS </span>
               {finding.cvss}
             </div>
           )}
           {finding.cwe && (
             <div>
-              <span className="text-neutral-500">CWE </span>
+              <span className="text-ink-muted">CWE </span>
               {finding.cwe}
             </div>
           )}
@@ -94,11 +94,11 @@ export function FindingDrawer({
         {finding.target && <Evidence label={t("findings.target")} value={finding.target} />}
 
         <label className="text-sm">
-          <span className="text-neutral-400">{t("findings.status")}</span>
+          <span className="text-ink-muted">{t("findings.status")}</span>
           <select
             value={finding.status}
             onChange={(e) => onTriage(e.target.value as FindingStatus)}
-            className="mt-1 w-full rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-md border border-line bg-surface-sunken px-3 py-2 text-sm"
           >
             {STATUSES.map((s) => (
               <option key={s} value={s}>
@@ -109,7 +109,7 @@ export function FindingDrawer({
         </label>
 
         <div className="space-y-3">
-          <div className="text-sm font-medium text-neutral-300">{t("findings.evidence")}</div>
+          <div className="text-sm font-medium text-ink">{t("findings.evidence")}</div>
           <Evidence label={t("findings.request")} value={ev["request"]} />
           <Evidence label={t("findings.response")} value={ev["response"]} />
           {/* Any remaining evidence keys */}
