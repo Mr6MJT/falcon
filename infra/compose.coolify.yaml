@@ -5,6 +5,11 @@
 #   docker compose --env-file infra/.env \
 #     -f infra/compose.prod.yaml -f infra/compose.coolify.yaml up -d
 #
+# IMPORTANT: the API + web join the shared `coolify` network for ingress, where other stacks
+# also have containers named `postgres` / `redis`. To avoid resolving to the WRONG database,
+# Falcon's postgres/redis get unique aliases (falcon-postgres / falcon-redis) and the API is
+# pointed at those. worker/beat/bootstrap stay on the private network and are unaffected.
+#
 # Requires DNS: falcon.orvex.services -> server IP, DNS-only, so Traefik's Let's Encrypt
 # (certresolver "letsencrypt") HTTP-01 challenge reaches the origin.
 networks:
@@ -12,9 +17,18 @@ networks:
     external: true
 
 services:
-  # No host reverse proxy — Traefik owns 80/443. Park Caddy in an unused profile.
   caddy:
     profiles: ["disabled"]
+
+  postgres:
+    networks:
+      default:
+        aliases: [falcon-postgres]
+
+  redis:
+    networks:
+      default:
+        aliases: [falcon-redis]
 
   web:
     networks:
@@ -23,14 +37,12 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=coolify
-      # HTTPS: the web app serves everything on the host that isn't /api.
       - "traefik.http.routers.falcon-web.rule=Host(`falcon.orvex.services`)"
       - traefik.http.routers.falcon-web.entrypoints=https
       - traefik.http.routers.falcon-web.tls=true
       - traefik.http.routers.falcon-web.tls.certresolver=letsencrypt
       - traefik.http.routers.falcon-web.service=falcon-web
       - traefik.http.services.falcon-web.loadbalancer.server.port=3000
-      # HTTP -> HTTPS redirect
       - "traefik.http.routers.falcon-web-http.rule=Host(`falcon.orvex.services`)"
       - traefik.http.routers.falcon-web-http.entrypoints=http
       - traefik.http.routers.falcon-web-http.service=falcon-web
@@ -41,10 +53,14 @@ services:
     networks:
       - default
       - coolify
+    # Point at the unambiguous aliases (see note above). Other env keys merge from prod.
+    environment:
+      ORVEX_DATABASE_URL: "postgresql+psycopg://orvex_app:${ORVEX_DB_PASSWORD}@falcon-postgres:5432/orvex"
+      ORVEX_AUTH_DATABASE_URL: "postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@falcon-postgres:5432/orvex"
+      ORVEX_REDIS_URL: "redis://falcon-redis:6379/0"
     labels:
       - traefik.enable=true
       - traefik.docker.network=coolify
-      # HTTPS for /api/* — higher priority than the web router, prefix stripped before the API.
       - "traefik.http.routers.falcon-api.rule=Host(`falcon.orvex.services`) && PathPrefix(`/api`)"
       - traefik.http.routers.falcon-api.entrypoints=https
       - traefik.http.routers.falcon-api.tls=true
