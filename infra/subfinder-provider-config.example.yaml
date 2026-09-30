@@ -1,0 +1,36 @@
+# subfinder provider API keys — copy to a private file and fill in the ones you have.
+#
+#   cp infra/subfinder-provider-config.example.yaml infra/subfinder-provider-config.yaml
+#   # edit it, then point the worker at it:
+#   ORVEX_SUBFINDER_CONFIG=/app/infra/subfinder-provider-config.yaml
+#
+# All of these have FREE tiers. You do not need all of them — even 3–4 hugely increase
+# subdomain discovery over the default free sources. Never commit the filled-in file
+# (infra/subfinder-provider-config.yaml is already covered by .gitignore).
+#
+# Format: each key is a provider; the value is a list of API keys (some want "id:secret").
+
+# --- highest yield, free tier ---
+virustotal: []          # https://www.virustotal.com/gui/my-apikey        (free)
+securitytrails: []      # https://securitytrails.com/app/account/credentials (free tier)
+shodan: []              # https://account.shodan.io/                        (free w/ email)
+censys: []              # id:secret from https://search.censys.io/account/api
+github: []              # a GitHub PAT (public_repo scope) — great for subdomain leaks in code
+
+# --- also useful, free ---
+bevigil: []
+binaryedge: []
+bufferover: []
+certspotter: []
+chaos: []               # https://chaos.projectdiscovery.io/ (free for researchers)
+fofa: []                # email:key
+fullhunt: []
+hunter: []
+intelx: []              # host:key
+leakix: []
+netlas: []
+passivetotal: []        # username:key
+quake: []
+robtex: []
+whoisxmlapi: []
+zoomeyeapi: []

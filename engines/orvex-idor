@@ -39,6 +39,9 @@ def make_fetch(cookie: str):
 
 
 def main(argv: list[str]) -> int:
+    if "-h" in argv or "--help" in argv:
+        print("usage: orvex-idor URL...  (sessions via ORVEX_IDOR_COOKIE_A/B)")
+        return 0
     fetch_a = make_fetch(os.environ.get("ORVEX_IDOR_COOKIE_A", ""))
     fetch_b = make_fetch(os.environ.get("ORVEX_IDOR_COOKIE_B", ""))
     for url in argv:

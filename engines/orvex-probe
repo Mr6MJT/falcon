@@ -51,6 +51,9 @@ def parse_args(argv: list[str]) -> tuple[str | None, list[str]]:
 
 
 def main(argv: list[str]) -> int:
+    if "-h" in argv or "--help" in argv:
+        print("usage: orvex-probe [--methods GET] URL...")
+        return 0
     method, targets = parse_args(argv)
     fetch = make_fetch(method if method and method != "GET" else None)
     for url in targets:

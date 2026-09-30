@@ -54,6 +54,12 @@ class ToolProfile:
     rate_flags: callable  # (RateSpec) -> list[str]
     # Hard cap on attempts for sharp tools; None = not attempt-capped.
     max_attempts: int | None = None
+    # How targets reach the engine. The ProjectDiscovery family (subfinder, dnsx, httpx,
+    # naabu, tlsx, katana, nuclei) and gau read their target list from STDIN (one per line)
+    # and ignore positional arguments; feeding them positionally makes them run against an
+    # empty set. Tools with a bespoke CLI (wafw00f <url>, ffuf -u, trufflehog, our own
+    # probes) take targets as positional args instead.
+    stdin_targets: bool = True
 
 
 def _pd_httpx_rate(spec: RateSpec) -> list[str]:
@@ -101,22 +107,23 @@ TOOL_PROFILES: dict[str, ToolProfile] = {
     # Port / service, TLS, WAF, tech fingerprinting.
     "naabu": ToolProfile("naabu", ["naabu"], _naabu_rate),
     "tlsx": ToolProfile("tlsx", ["tlsx"], _tlsx_rate),
-    "wafw00f": ToolProfile("wafw00f", ["wafw00f"], _no_rate),
+    "wafw00f": ToolProfile("wafw00f", ["wafw00f"], _no_rate, stdin_targets=False),
     # URL / endpoint discovery + secret detection.
     "katana": ToolProfile("katana", ["katana"], lambda s: ["-rl", str(int(s.rps)),
                                                            "-c", str(s.max_concurrency)]),
     "gau": ToolProfile("gau", ["gau"], _no_rate),  # passive/historical, no live requests
-    "trufflehog": ToolProfile("trufflehog", ["trufflehog"], _no_rate),
+    "trufflehog": ToolProfile("trufflehog", ["trufflehog"], _no_rate, stdin_targets=False),
     "nuclei": ToolProfile("nuclei", ["nuclei"], _nuclei_rate),
     # Content/parameter fuzzing — opt-in, gated, rate-limited, NON-destructive.
-    "ffuf": ToolProfile("ffuf", ["ffuf"], _ffuf_rate),
+    "ffuf": ToolProfile("ffuf", ["ffuf"], _ffuf_rate, stdin_targets=False),
     # Canary-based active probes (GET/idempotent by default): reflection/boolean-diff markers
     # for xss/sqli/open-redirect/ssrf. Our own bundled tool; egress still via the gateway.
-    "orvex-probe": ToolProfile("orvex-probe", ["orvex-probe"], _no_rate),
+    "orvex-probe": ToolProfile("orvex-probe", ["orvex-probe"], _no_rate, stdin_targets=False),
     # IDOR differential testing (two sessions). Findings are hard-capped at candidate.
-    "orvex-idor": ToolProfile("orvex-idor", ["orvex-idor"], _no_rate),
+    "orvex-idor": ToolProfile("orvex-idor", ["orvex-idor"], _no_rate, stdin_targets=False),
     # Safe login testing: brute-force-PROTECTION-exists only, hard-capped at 5 attempts.
-    "login_probe": ToolProfile("login_probe", ["orvex-login-probe"], lambda s: [], max_attempts=5),
+    "login_probe": ToolProfile("login_probe", ["orvex-login-probe"], lambda s: [],
+                               max_attempts=5, stdin_targets=False),
 }
 
 
@@ -159,6 +166,7 @@ def run_tool(
     bucket: TokenBucketBackend | None = None,
     audit=None,  # callable(event: dict) -> None; the hash-chained audit sink
     redact_stdout: bool = True,  # False ONLY for the secrets stage (see below)
+    no_target_argv: bool = False,  # validate+rate-limit targets but don't put them on argv/stdin
     _runner=None,  # injectable spawn fn for tests; defaults to subprocess
 ) -> ToolResult:
     if tool not in TOOL_PROFILES:
@@ -198,15 +206,25 @@ def run_tool(
     cmd = list(tp.base_cmd) + tp.rate_flags(spec) + (extra_args or [])
     if attempts is not None:
         cmd += ["--max-attempts", str(attempts)]
-    cmd += kept
+    # ProjectDiscovery engines read their target list from stdin; bespoke-CLI tools take it
+    # positionally. Getting this wrong makes the engine run against an empty target set.
+    # no_target_argv: the caller already embedded the (now scope-validated) target in extra_args
+    # — e.g. ffuf's `-u https://host/FUZZ` — so we neither append it nor pipe it.
+    if no_target_argv:
+        stdin_data = None
+    elif tp.stdin_targets:
+        stdin_data = "\n".join(kept) + "\n"
+    else:
+        cmd += kept
+        stdin_data = None
 
     audit({"event": "tool_spawn", "tool": tool, "cmd": " ".join(shlex.quote(c) for c in cmd),
            "targets": kept, "profile": profile.value})
 
     if _runner is not None:
-        rc, raw_out, raw_err = _runner(cmd, timeout_s)
+        rc, raw_out, raw_err = _runner(cmd, timeout_s, stdin_data)
     else:
-        rc, raw_out, raw_err = _spawn(cmd, timeout_s)
+        rc, raw_out, raw_err = _spawn(cmd, timeout_s, stdin_data)
 
     if redact_stdout:
         out, out_secrets = redact(raw_out)
@@ -225,17 +243,23 @@ def run_tool(
     )
 
 
-def _spawn(cmd: list[str], timeout_s: float) -> tuple[int, str, str]:
-    """Spawn in a new process group; kill the whole group on timeout/cancel."""
+def _spawn(cmd: list[str], timeout_s: float,
+           stdin_data: str | None = None) -> tuple[int, str, str]:
+    """Spawn in a new process group; kill the whole group on timeout/cancel.
+
+    ``stdin_data`` (targets, one per line) is piped to the engine's stdin when set; engines
+    that read their target list from stdin get an empty, closed stdin otherwise.
+    """
     proc = subprocess.Popen(
         cmd,
+        stdin=subprocess.PIPE if stdin_data is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         start_new_session=True,  # own process group -> killpg works
     )
     try:
-        out, err = proc.communicate(timeout=timeout_s)
+        out, err = proc.communicate(input=stdin_data, timeout=timeout_s)
         return proc.returncode, out or "", err or ""
     except subprocess.TimeoutExpired:
         _kill_group(proc)

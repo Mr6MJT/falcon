@@ -17,12 +17,14 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from packages.core import stages as stages_mod
 from packages.core.crypto import decrypt, encrypt, generate_key_b64
 from packages.core.guard import ToolResult
 from packages.core.models import (
     Authorization,
     AuthorizationType,
     DNSRecord,
+    HTTPEndpoint,
     Organization,
     Parameter,
     Program,
@@ -100,9 +102,21 @@ def scan(session):
                   record_type="A", value="93.184.216.34"),
         DNSRecord(org_id=org.id, scan_id=sc.id, hostname="api.example.com",
                   record_type="A", value="93.184.216.35"),
+        # an in-scope JS asset the secrets stage will select and (via a stubbed fetch) scan
+        HTTPEndpoint(org_id=org.id, scan_id=sc.id, url="https://www.example.com/app.js"),
     ])
     session.flush()
     return sc
+
+
+# Body served by the stubbed fetch: a JS bundle with a hard-coded AWS key.
+LEAK_URL = "https://www.example.com/app.js"
+LEAK_BODY = f'const cfg={{region:"us-east-1",key:"{LEAKED}"}};'
+
+
+def _stub_fetch(monkeypatch, bodies=None):
+    bodies = bodies if bodies is not None else {LEAK_URL: LEAK_BODY}
+    monkeypatch.setattr(stages_mod, "_fetch_response_bodies", lambda ctx, urls: dict(bodies))
 
 
 def _ctx(session, scan, events=None):
@@ -144,31 +158,27 @@ def test_urls_populates_endpoints_and_params_and_drops_out_of_scope(session, sca
     assert not any("attacker.net" in u for u in urls)
 
 
-def test_secrets_never_store_plaintext(session, scan):
+def test_secrets_never_store_plaintext(session, scan, monkeypatch):
+    _stub_fetch(monkeypatch)
     events: list = []
-    run_secrets(_ctx(session, scan, events=events))
+    stats = run_secrets(_ctx(session, scan, events=events))
+    assert stats["scanned"] == 1
     secret = session.execute(select(Secret).where(Secret.scan_id == scan.id)).scalar_one()
-    assert secret.detector == "AWS"
-    assert secret.redacted_match == "AKIA…MPLE"      # masked
+    assert secret.detector == "aws_access_key_id"
+    assert secret.redacted_match == "AKIA…MPLE"      # masked (first4…last4)
     assert secret.sha256 == __import__("hashlib").sha256(LEAKED.encode()).hexdigest()
-    assert secret.ciphertext is None                 # default: no full retention
+    assert secret.location == LEAK_URL               # traced back to the JS file
+    assert secret.ciphertext is None                 # regex net never retains plaintext
     # The raw secret must not appear anywhere persisted or audited.
     assert LEAKED not in (secret.redacted_match + secret.location)
     assert not any(LEAKED in str(e) for e in events)
 
 
-def test_secrets_encrypt_when_retention_opted_in(session, scan):
-    key = generate_key_b64()
-    os.environ["ORVEX_SECRET_KEY"] = key
-    try:
-        scan.config = {"retain_secrets": True}
-        session.flush()
-        run_secrets(_ctx(session, scan))
-        secret = session.execute(select(Secret).where(Secret.scan_id == scan.id)).scalar_one()
-        assert secret.ciphertext is not None
-        assert decrypt(bytes(secret.ciphertext), key) == LEAKED  # recoverable with the key
-    finally:
-        del os.environ["ORVEX_SECRET_KEY"]
+def test_secrets_empty_when_no_assets(session, scan, monkeypatch):
+    # No matched bodies -> no secrets, and nothing blows up.
+    _stub_fetch(monkeypatch, bodies={})
+    stats = run_secrets(_ctx(session, scan))
+    assert stats == {"secrets": 0, "scanned": 0}
 
 
 def test_crypto_roundtrip_and_key_required():
@@ -178,7 +188,8 @@ def test_crypto_roundtrip_and_key_required():
     assert decrypt(blob, key) == "s3cr3t-value"
 
 
-def test_secrets_count_is_idempotent(session, scan):
+def test_secrets_count_is_idempotent(session, scan, monkeypatch):
+    _stub_fetch(monkeypatch)
     run_secrets(_ctx(session, scan))
     run_secrets(_ctx(session, scan))
     n = session.execute(
