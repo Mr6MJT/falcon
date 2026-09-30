@@ -37,6 +37,7 @@ from .models import (
     Parameter,
     Secret,
     Service,
+    Severity,
     Subdomain,
     Technology,
     TLSInfo,
@@ -558,20 +559,29 @@ def _parse_httpx_srd_index(index_path: str) -> dict[str, str]:
     return mapping
 
 
-def _fetch_response_bodies(ctx: StageContext, urls: list[str]) -> dict[str, str]:
-    """Fetch each URL's body with the scoped httpx engine and return {source_url: body}.
+def _fetch_response_bodies(
+    ctx: StageContext, urls: list[str], *,
+    extra_httpx: list[str] | None = None, match_codes: str | None = "200,201,203,206",
+) -> dict[str, str]:
+    """Fetch each URL with the scoped httpx engine and return {source_url: stored_response}.
 
-    httpx (-srd) writes each response to <tmp>/response/<host>/<hash>.txt plus an index.txt
-    mapping file->URL; we read them back and delete the temp dir. Separated from run_secrets so
-    the disk side-effect can be stubbed in tests.
+    The stored text is the full response (status line + headers + body), so callers can scan
+    either the body (secrets, takeover fingerprints) or the response headers (CORS). httpx (-srd)
+    writes each response to <tmp>/response/<host>/<hash>.txt plus an index.txt mapping file->URL.
+    ``match_codes`` restricts which status codes are stored (None = store every response);
+    ``extra_httpx`` adds flags such as a probe header. Separated out so the disk side-effect can
+    be stubbed in tests.
     """
     run = ctx.runner()
     bodies: dict[str, str] = {}
-    with tempfile.TemporaryDirectory(prefix="orvex-secrets-") as td:
+    base_args = ["-silent", "-timeout", "15"]
+    if match_codes:
+        base_args += ["-mc", match_codes]
+    base_args += (extra_httpx or [])
+    with tempfile.TemporaryDirectory(prefix="orvex-fetch-") as td:
         for chunk in chunked(urls, 200):
             ctx.check_cancel()
-            run("httpx", chunk, extra_args=["-silent", "-srd", td, "-timeout", "15",
-                                            "-mc", "200,201,203,206"])
+            run("httpx", chunk, extra_args=[*base_args, "-srd", td])
         index = _parse_httpx_srd_index(os.path.join(td, "response", "index.txt"))
         for root, _dirs, files in os.walk(td):
             for fn in files:
@@ -676,6 +686,138 @@ def run_findings(ctx: StageContext) -> dict:
     for row in finding_rows:
         _publish_finding(ctx, row)
     return {"findings": n}
+
+
+# ======================= subdomain takeover (writeup-driven) =======================
+# Dangling-CNAME takeover is one of the highest-frequency, highest-signal findings in public
+# bug-bounty writeups. We reuse the CNAME records already collected by the dns stage and, for
+# any CNAME pointing at a takeover-prone provider, fetch the page once and look for that
+# provider's "unclaimed" fingerprint. Non-destructive: read-only GETs, no claiming attempted.
+# (provider CNAME substring, human name, unclaimed-page fingerprint)
+TAKEOVER_SIGNATURES: tuple[tuple[str, str, str], ...] = (
+    ("github.io", "GitHub Pages", "There isn't a GitHub Pages site here"),
+    ("herokuapp.com", "Heroku", "No such app"),
+    ("herokudns.com", "Heroku", "No such app"),
+    ("s3.amazonaws.com", "AWS S3", "NoSuchBucket"),
+    ("cloudfront.net", "AWS CloudFront", "ERROR: The request could not be satisfied"),
+    ("fastly.net", "Fastly", "Fastly error: unknown domain"),
+    ("myshopify.com", "Shopify", "Sorry, this shop is currently unavailable"),
+    ("zendesk.com", "Zendesk", "Help Center Closed"),
+    ("surge.sh", "Surge.sh", "project not found"),
+    ("bitbucket.io", "Bitbucket", "Repository not found"),
+    ("ghost.io", "Ghost", "The thing you were looking for is no longer here"),
+    ("pantheonsite.io", "Pantheon", "The gods are wise"),
+    ("domains.tumblr.com", "Tumblr", "Whatever you were looking for doesn't currently exist"),
+    ("wpengine.com", "WP Engine", "The site you were looking for couldn't be found"),
+    ("readme.io", "Readme.io", "Project doesnt exist"),
+    ("cargocollective.com", "Cargo", "404 Not Found"),
+    ("netlify.app", "Netlify", "Not Found - Request ID"),
+    ("azurewebsites.net", "Azure App Service", "404 Web Site not found"),
+    ("trafficmanager.net", "Azure Traffic Manager", "404 Web Site not found"),
+    ("helpscoutdocs.com", "Help Scout", "No settings were found for this company"),
+    ("statuspage.io", "Statuspage", "You are being redirected"),
+    ("uservoice.com", "UserVoice", "This UserVoice subdomain is currently available"),
+    ("wixdns.net", "Wix", "Error ConnectYourDomain occurred"),
+    ("desk.com", "Desk", "Please try again or try Desk.com free"),
+)
+
+
+def run_takeover(ctx: StageContext) -> dict:
+    """Detect dangling-CNAME subdomain takeover from collected DNS records (non-destructive)."""
+    rows = ctx.session.execute(
+        select(DNSRecord.hostname, DNSRecord.value).where(
+            DNSRecord.scan_id == ctx.scan.id, DNSRecord.record_type == "CNAME"
+        )
+    ).all()
+    candidates: dict[str, tuple[str, str, str]] = {}  # host -> (cname, provider, marker)
+    for host, cname in rows:
+        cl = (cname or "").lower()
+        for sub, provider, marker in TAKEOVER_SIGNATURES:
+            if sub in cl and is_in_scope(host, ctx.scope_rules,
+                                         allow_internal=ctx.allow_internal).allowed:
+                candidates[host] = (cname, provider, marker)
+                break
+    if not candidates:
+        return {"takeover_candidates": 0, "confirmed": 0, "findings": 0}
+    # Fetch each candidate once (https then http) and look for the unclaimed fingerprint.
+    urls = [f"https://{h}" for h in candidates] + [f"http://{h}" for h in candidates]
+    bodies = _fetch_response_bodies(ctx, urls, match_codes=None)
+    finding_rows: list[dict] = []
+    for host, (cname, provider, marker) in candidates.items():
+        blob = " ".join(b for u, b in bodies.items() if (urlparse(u).hostname or "") == host)
+        matched = marker.lower() in blob.lower()
+        finding_rows.append({
+            "type": "subdomain_takeover",
+            "title": (f"Subdomain takeover: {host} -> {provider} "
+                      + ("(unclaimed fingerprint matched)" if matched
+                         else "(dangling CNAME — verify manually)")),
+            "severity": Severity.HIGH,
+            "confidence": Confidence.CONFIRMED if matched else Confidence.CANDIDATE,
+            "target": host, "cwe": "CWE-350",
+            "evidence": {"cname": cname, "provider": provider, "fingerprint_matched": matched},
+            "dedup_key": make_dedup_key("takeover", host, provider),
+        })
+    n = _insert_findings(ctx, finding_rows)
+    confirmed = sum(1 for r in finding_rows if r["confidence"] == Confidence.CONFIRMED)
+    return {"takeover_candidates": len(candidates), "confirmed": confirmed, "findings": n}
+
+
+# ========================= CORS misconfiguration (writeup-driven) =========================
+CORS_PROBE_ORIGIN = "https://orvex-cors-probe.example"
+
+
+def _response_header(blob: str, name: str) -> str | None:
+    """Last value of a header in a stored httpx response (case-insensitive)."""
+    val = None
+    want = name.lower()
+    for line in blob.splitlines():
+        k, sep, v = line.partition(":")
+        if sep and k.strip().lower() == want:
+            val = v.strip()
+    return val
+
+
+def run_cors(ctx: StageContext) -> dict:
+    """Probe live hosts for a CORS policy that reflects an arbitrary Origin (non-destructive).
+
+    Sends one GET per host with `Origin: <probe>` and inspects the response's
+    Access-Control-* headers. Reflecting the probe origin with credentials is directly
+    observable, so it is reported confirmed; reflection without credentials is a medium
+    misconfiguration.
+    """
+    hosts = _resolved_hosts(ctx) or _in_scope_subdomains(ctx)
+    if not hosts:
+        return {"cors_checked": 0, "findings": 0}
+    urls = [f"https://{h}" for h in hosts][:200]
+    bodies = _fetch_response_bodies(
+        ctx, urls, extra_httpx=["-H", f"Origin: {CORS_PROBE_ORIGIN}"], match_codes=None)
+    finding_rows: list[dict] = []
+    for url, blob in bodies.items():
+        acao = _response_header(blob, "Access-Control-Allow-Origin")
+        if not acao or acao.strip() != CORS_PROBE_ORIGIN:
+            continue  # only an origin-reflecting policy is interesting
+        creds = (_response_header(blob, "Access-Control-Allow-Credentials") or "").lower() == "true"
+        host = urlparse(url).hostname or url
+        if creds:
+            finding_rows.append({
+                "type": "cors_reflect_credentials",
+                "title": f"CORS reflects arbitrary Origin WITH credentials: {host}",
+                "severity": Severity.HIGH, "confidence": Confidence.CONFIRMED,
+                "target": url, "cwe": "CWE-942",
+                "evidence": {"reflected_origin": acao, "allow_credentials": True},
+                "dedup_key": make_dedup_key("cors", host, "creds"),
+            })
+        else:
+            finding_rows.append({
+                "type": "misconfiguration",
+                "title": f"CORS reflects arbitrary Origin (no credentials): {host}",
+                "severity": Severity.MEDIUM, "confidence": Confidence.CONFIRMED,
+                "target": url, "cwe": "CWE-942",
+                "evidence": {"reflected_origin": acao, "allow_credentials": False},
+                "dedup_key": make_dedup_key("cors", host, "nocreds"),
+            })
+    n = _insert_findings(ctx, finding_rows)
+    return {"cors_checked": len(bodies), "findings": n}
 
 
 # ============================ gated active modules (slice 13) ============================
@@ -893,6 +1035,8 @@ STAGE_FUNCS: dict[str, Callable[[StageContext], dict]] = {
     "urls": run_urls,
     "secrets": run_secrets,
     "findings": run_findings,
+    "takeover": run_takeover,
+    "cors": run_cors,
     "fuzzing": run_fuzzing,
     "active": run_active,
     "login": run_login,

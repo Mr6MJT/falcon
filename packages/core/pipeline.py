@@ -50,6 +50,10 @@ PIPELINE: tuple[StageDef, ...] = (
     StageDef("secrets", deps=("urls",), config_key="secrets", queue="recon"),
     # Findings: nuclei over discovered endpoints + tech; runs after tech + urls are known.
     StageDef("findings", deps=("tech", "urls"), config_key="findings", queue="cpu"),
+    # Writeup-driven, non-destructive detections. Takeover reuses collected CNAMEs; CORS sends
+    # one Origin-probe GET per live host. Both are read-only and on by default.
+    StageDef("takeover", deps=("dns",), config_key="takeover", queue="recon"),
+    StageDef("cors", deps=("httpx",), config_key="cors", queue="recon"),
     # --- Gated active modules (slice 13): OFF by default; enabled only when the scan is
     # configured for active testing, which Gate 1 permits only if the authorization allows it.
     StageDef("fuzzing", deps=("urls",), config_key="fuzzing",

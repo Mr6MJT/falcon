@@ -35,3 +35,6 @@ pgdata/
 
 # subfinder provider keys (filled-in copy is secret)
 infra/subfinder-provider-config.yaml
+
+# downloaded wordlists (large; fetch via SecLists)
+infra/wordlists/
