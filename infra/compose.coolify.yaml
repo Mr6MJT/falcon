@@ -1,0 +1,56 @@
+# Coolify/Traefik overlay — routes Falcon through the existing `coolify-proxy` (Traefik) the
+# same way Coolify-managed sites are, via container labels on the shared `coolify` network.
+# Adds only new Traefik routers (falcon-*) — it cannot affect other sites' routes.
+#
+#   docker compose --env-file infra/.env \
+#     -f infra/compose.prod.yaml -f infra/compose.coolify.yaml up -d
+#
+# Requires DNS: falcon.orvex.services -> server IP, DNS-only, so Traefik's Let's Encrypt
+# (certresolver "letsencrypt") HTTP-01 challenge reaches the origin.
+networks:
+  coolify:
+    external: true
+
+services:
+  # No host reverse proxy — Traefik owns 80/443. Park Caddy in an unused profile.
+  caddy:
+    profiles: ["disabled"]
+
+  web:
+    networks:
+      - default
+      - coolify
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      # HTTPS: the web app serves everything on the host that isn't /api.
+      - "traefik.http.routers.falcon-web.rule=Host(`falcon.orvex.services`)"
+      - traefik.http.routers.falcon-web.entrypoints=https
+      - traefik.http.routers.falcon-web.tls=true
+      - traefik.http.routers.falcon-web.tls.certresolver=letsencrypt
+      - traefik.http.routers.falcon-web.service=falcon-web
+      - traefik.http.services.falcon-web.loadbalancer.server.port=3000
+      # HTTP -> HTTPS redirect
+      - "traefik.http.routers.falcon-web-http.rule=Host(`falcon.orvex.services`)"
+      - traefik.http.routers.falcon-web-http.entrypoints=http
+      - traefik.http.routers.falcon-web-http.service=falcon-web
+      - traefik.http.routers.falcon-web-http.middlewares=falcon-redirect
+      - traefik.http.middlewares.falcon-redirect.redirectscheme.scheme=https
+
+  api:
+    networks:
+      - default
+      - coolify
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      # HTTPS for /api/* — higher priority than the web router, prefix stripped before the API.
+      - "traefik.http.routers.falcon-api.rule=Host(`falcon.orvex.services`) && PathPrefix(`/api`)"
+      - traefik.http.routers.falcon-api.entrypoints=https
+      - traefik.http.routers.falcon-api.tls=true
+      - traefik.http.routers.falcon-api.tls.certresolver=letsencrypt
+      - traefik.http.routers.falcon-api.priority=100
+      - traefik.http.routers.falcon-api.service=falcon-api
+      - traefik.http.routers.falcon-api.middlewares=falcon-api-strip
+      - traefik.http.middlewares.falcon-api-strip.stripprefix.prefixes=/api
+      - traefik.http.services.falcon-api.loadbalancer.server.port=8000
