@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from celery import shared_task
 from sqlalchemy import select
 
+from packages.core.audit import AuditSink
 from packages.core.cancel import RedisCancelFlag
 from packages.core.db import make_engine, make_session_factory, org_session
 from packages.core.events import RedisEventBus, ScanEventPublisher
@@ -62,6 +63,9 @@ def build_context(session, scan: Scan) -> StageContext:
         allow_internal=bool(cfg.get("allow_internal")),
         is_cancelled=lambda: _cancel.is_set(scan.id),
         publisher=ScanEventPublisher(_bus, scan.id),
+        # Hash-chained audit trail: guard scope-drops/spawns and stage events are persisted,
+        # each in its own committed transaction (survives a stage rollback).
+        audit=AuditSink(_factory(), scan.org_id, scan.id),
     )
 
 
@@ -75,6 +79,8 @@ def start_scan(scan_id: str, org_id: str) -> None:
         scan.status = ScanStatus.RUNNING
         scan.started_at = scan.started_at or datetime.now(UTC)
         _bus and ScanEventPublisher(_bus, scan.id).scan_status(ScanStatus.RUNNING.value)
+        org, sid = scan.org_id, scan.id
+    AuditSink(_factory(), org, sid)({"event": "scan_started", "scan_id": str(sid)})
     advance_scan.delay(scan_id, org_id)
 
 
@@ -93,6 +99,8 @@ def _finalize_if_terminal(session, scan_id: str) -> None:
     scan.status = ScanStatus.FAILED if any_failed else ScanStatus.COMPLETED
     scan.finished_at = datetime.now(UTC)
     _bus and ScanEventPublisher(_bus, scan.id).scan_status(scan.status.value)
+    AuditSink(_factory(), scan.org_id, scan.id)(
+        {"event": "scan_finished", "status": scan.status.value})
 
 
 @shared_task(name="orvex.advance_scan")
