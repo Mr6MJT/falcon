@@ -50,6 +50,9 @@ def parse_args(argv: list[str]) -> tuple[int, list[str]]:
 
 
 def main(argv: list[str]) -> int:
+    if "-h" in argv or "--help" in argv:
+        print("usage: orvex-login-probe [--max-attempts N<=5] URL...")
+        return 0
     attempts, targets = parse_args(argv)
     for url in targets:
         bf = login_bruteforce_protection(url, fetch, max_attempts=attempts)

@@ -40,15 +40,22 @@ jobs:
         run: alembic check
 
       - name: install ProjectDiscovery httpx (for the e2e engine tests)
+        # Install to a dedicated dir and prepend it to PATH so the PD httpx binary shadows the
+        # pip-installed `httpx` Python CLI (used by starlette's test client) which is otherwise
+        # first on PATH.
         run: |
           curl -fsSL -o /tmp/httpx.zip \
             https://github.com/projectdiscovery/httpx/releases/download/v1.6.9/httpx_1.6.9_linux_amd64.zip
-          sudo unzip -o /tmp/httpx.zip httpx -d /usr/local/bin
-          sudo chmod +x /usr/local/bin/httpx
-          httpx -version
+          sudo mkdir -p /opt/pd
+          sudo unzip -o /tmp/httpx.zip httpx -d /opt/pd
+          sudo chmod +x /opt/pd/httpx
+          echo "/opt/pd" >> "$GITHUB_PATH"
+          /opt/pd/httpx -version
 
       - name: tests (scope, guard, RLS, honesty + real-engine e2e)
-        run: python -m pytest -q
+        run: |
+          command -v httpx
+          python -m pytest -q
 
       - name: lint
         run: ruff check packages scripts tests apps
